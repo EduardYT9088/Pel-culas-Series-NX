@@ -173,25 +173,233 @@ const IC={
 };
 // ---------- storage ----------
 const ls={get(k,d){try{const v=localStorage.getItem(k);return v==null?d:JSON.parse(v)}catch(e){return d}},set(k,v){try{localStorage.setItem(k,JSON.stringify(v))}catch(e){}}};
-const S={api:ls.get("nx_api",""),favs:ls.get("nx_favs",[]),hist:ls.get("nx_hist",[]),cur:null,hls:null};
+const S={dom:ls.get("nx_dom",""),favs:ls.get("nx_favs",[]),hist:ls.get("nx_hist",[]),cur:null,hls:null};
 const save=()=>{ls.set("nx_favs",S.favs);ls.set("nx_hist",S.hist)};
 // ---------- helpers ----------
 const esc=s=>String(s??"").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
 const clean=t=>String(t||"").replace(/^VER\s+/i,"").replace(/\s*Online\s+Gratis.*$/i,"").replace(/\s*(Online|Espa[ñn]ol).*HD.*$/i,"").trim();
 const TYPE={movie:"Película",series:"Serie",anime:"Anime"};
 let tt;function toast(m){const t=$("#toast");t.textContent=m;t.classList.add("on");clearTimeout(tt);tt=setTimeout(()=>t.classList.remove("on"),2600)}
-function base(){return (S.api||"").replace(/\/+$/,"")}
-async function api(path,ms=40000){
-  if(!base())throw new Error("Configura la URL de tu PeliApi en Ajustes");
+// ======================= MOTOR LOCAL (sin servidor) =======================
+// Lógica de extracción adaptada de PeliApi (MIT License) — Copyright (c) 2025 Feer (FxxMorgan)
+const UA="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36";
+const UAFF="Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:143.0) Gecko/20100101 Firefox/143.0";
+const DEF_DOM="https://www.pelisplushd.la";
+const BASE=()=>(S.dom||DEF_DOM).replace(/\/+$/,"");
+async function http(url,{referer,ua=UA,ms=15000}={}){
   const c=new AbortController(),to=setTimeout(()=>c.abort(),ms);
   try{
-    const r=await fetch(base()+"/api/v1/content"+path,{signal:c.signal});
-    const j=await r.json().catch(()=>({}));
-    if(!r.ok||j.success===false)throw new Error(j.error||j.message||("Error "+r.status));
-    return j.data;
-  }catch(e){if(e.name==="AbortError")throw new Error("Tiempo de espera agotado");throw e}
-  finally{clearTimeout(to)}
+    const h={"Accept":"text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8","Accept-Language":"es-ES,es;q=0.9,en;q=0.8","User-Agent":ua};
+    if(referer)h.Referer=referer;
+    const r=await fetch(url,{headers:h,signal:c.signal});
+    if(!r.ok)throw new Error("HTTP "+r.status);
+    return await r.text();
+  }finally{clearTimeout(to)}
 }
+const dom=h=>new DOMParser().parseFromString(h,"text/html");
+const txt=el=>el?el.textContent.trim():"";
+const abs=p=>!p?"":/^https?:/i.test(p)?p:BASE()+(p.startsWith("/")?"":"/")+p;
+const typeOf=p=>p.includes("/pelicula/")?"movie":p.includes("/serie/")?"series":p.includes("/anime/")?"anime":"movie";
+const slugOf=p=>{const a=p.split("/").filter(Boolean);return a[a.length-1]||""};
+function posters(d){
+  return [...d.querySelectorAll("a.Posters-link")].map(el=>{
+    const href=el.getAttribute("href")||"",slug=slugOf(href);if(!slug)return null;
+    const img=el.querySelector("img.Posters-img"),rt=txt(el.querySelector(".rating span"));
+    return{id:slug,slug,title:el.getAttribute("data-title")||txt(el.querySelector(".listing-content p")),
+      poster:abs((img&&(img.getAttribute("src")||img.getAttribute("data-src")))||""),
+      rating:rt?rt.split("/")[0]:null,type:typeOf(href),url:abs(href),provider:"pelisplus"};
+  }).filter(Boolean);
+}
+function serverKey(name,u){
+  let k=name.toLowerCase().replace(/[^a-z0-9]/g,"");
+  if(k.includes("streamwish")||u.includes("streamwish"))return"streamwish";
+  if(k.includes("voe")||u.includes("voe.sx"))return"voesx";
+  if(k.includes("streamtape")||u.includes("streamtape"))return"streamtape";
+  if(k.includes("netu")||k.includes("hqq")||/hqq|waaw|netu/.test(u))return"netu";
+  if(k.includes("vidhide")||u.includes("vidhide"))return"vidhide";
+  return k;
+}
+function parseServers(d){
+  const out=[];
+  if(d.querySelectorAll("#link_url span").length){
+    const lang=txt(d.querySelector(".divseason"))||"Latino",names=new Map();
+    d.querySelectorAll(".TbVideoNv li, .VideoPlayer li").forEach(li=>{
+      const id=li.getAttribute("data-id")||li.getAttribute("lid")||"",n=txt(li);if(id&&n)names.set(id,n)});
+    d.querySelectorAll("#link_url span").forEach(sp=>{
+      const u=sp.getAttribute("url")||"";if(!u)return;
+      const name=names.get(sp.getAttribute("lid")||"")||"Desconocido";
+      out.push({name,server:serverKey(name,u),language:lang,embedUrl:u});
+    });
+  }
+  if(!out.length){
+    d.querySelectorAll("li.playurl").forEach(li=>{
+      const u=li.getAttribute("data-url")||"";if(!u)return;
+      const a=li.querySelector("a"),name=txt(a)||txt(li)||"Desconocido";
+      out.push({name,server:serverKey(name,u),language:li.getAttribute("data-name")||"Subtitulado",embedUrl:u});
+    });
+  }
+  return out;
+}
+// ---- resolvedores ----
+const rot13=s=>s.replace(/[A-Za-z]/g,c=>String.fromCharCode(c.charCodeAt(0)+(c.toLowerCase()<"n"?13:-13)));
+function b64(s){s=s.replace(/[^A-Za-z0-9+/]/g,"");while(s.length%4)s+="=";return atob(s)}
+function voeDecode(raw){
+  try{
+    let s=rot13(raw);
+    ["@$","^^","~@","%?","*~","!!","#&"].forEach(p=>{s=s.split(p).join("_")});
+    s=s.split("_").join("");
+    s=b64(s);
+    s=s.split("").map(c=>String.fromCharCode(c.charCodeAt(0)-3)).join("");
+    s=s.split("").reverse().join("");
+    return JSON.parse(b64(s));
+  }catch(e){return null}
+}
+async function rVoe(u){
+  let html=await http(u,{ua:UAFF,ms:9000});
+  const m=html.match(/window\.location\.href\s*=\s*['"]([^'"]+)['"]/);
+  if(m)html=await http(m[1],{ua:UAFF,ms:9000});
+  const d=dom(html);
+  const sc=[...d.querySelectorAll('script[type="application/json"]')].find(s=>{try{const p=JSON.parse(s.textContent);return Array.isArray(p)&&typeof p[0]==="string"}catch(e){return false}});
+  if(!sc)return null;
+  const data=voeDecode(JSON.parse(sc.textContent)[0]);
+  return data?(data.direct_access_url||data.source||null):null;
+}
+function unpack(src){
+  const m=src.match(/\}\('([\s\S]*)',\s*(\d+)\s*,\s*(\d+)\s*,\s*'([\s\S]*?)'\.split\('\|'\)/);
+  if(!m)return null;
+  const a=+m[2],k=m[4].split("|");
+  const dec=w=>{let n=0;for(const ch of w){n=n*a+(/\d/.test(ch)?+ch:/[a-z]/.test(ch)?ch.charCodeAt(0)-87:ch.charCodeAt(0)-29)}return n};
+  return m[1].replace(/\\'/g,"'").replace(/\b\w+\b/g,w=>{const v=k[dec(w)];return v?v:w});
+}
+function bestQuality(master,base){
+  const L=master.split("\n");let best=null,score=0;
+  for(let i=0;i<L.length;i++){
+    const r=/RESOLUTION=(\d+)x(\d+)/.exec(L[i]);if(!r)continue;
+    const nx=(L[i+1]||"").trim();if(!nx||nx.startsWith("#"))continue;
+    if(r[1]*r[2]>score){score=r[1]*r[2];best=new URL(nx,base).href}
+  }
+  return best;
+}
+function swMirror(u){
+  try{
+    const x=new URL(u);
+    const dmca=["playnixes.com","niramirus.com","medixiru.com","hgplaycdn.com","hglamioz.com"],main=["kravaxxa.com","davioad.com","haxloppd.com","tryzendm.com","dumbalag.com"],rules=["dhcplay.com","hglink.to","test.hglink.to","wish-redirect.aiavh.com"];
+    const pool=rules.includes(x.hostname)?main:dmca;
+    return"https://"+pool[Math.floor(Math.random()*pool.length)]+x.pathname+x.search;
+  }catch(e){return u}
+}
+async function rStreamwish(u){
+  const mirror=swMirror(u);let page=mirror,html;
+  try{html=await http(mirror,{ua:UAFF,referer:mirror})}catch(e){page=u;html=await http(u,{ua:UAFF,referer:u})}
+  const sm=html.match(/(eval\(function\(p,a,c,k,e,d\)[\s\S]*?)<\/script>/i);
+  if(!sm)return null;
+  const code=unpack(sm[1]);if(!code)return null;
+  const lm=code.match(/var\s+links\s*=\s*(\{[\s\S]*?\});/i);if(!lm)return null;
+  let links;try{links=JSON.parse(lm[1])}catch(e){return null}
+  const l=links.hls4||links.hls3||links.hls1||links.hls2;if(!l)return null;
+  const master=l.startsWith("/")?new URL(l,page).href:l;
+  try{
+    const pl=await http(master,{ua:"Mozilla/5.0",referer:page});
+    return bestQuality(pl,master.slice(0,master.lastIndexOf("/")+1))||master;
+  }catch(e){return master}
+}
+async function rStreamtape(u){
+  const html=await http(u,{ua:UAFF,ms:9000});
+  const re=/document\.getElementById\(['"]([^'"]+)['"]\)\.innerHTML\s*=\s*(.+);/g;let m,last=null;
+  while((m=re.exec(html))){
+    const expr=m[2].replace(/\+ ?''/g,"").replace(/\.substring\((\d+)\)/g,(_,p)=>`.slice(${p})`);
+    try{const v=new Function("return "+expr)();if(v&&/get_video/.test(v))last=v}catch(e){}
+  }
+  if(!last)return null;
+  return last.startsWith("//")?"https:"+last:last.startsWith("/")?"https://streamtape.com"+last:last;
+}
+async function resolveEmbed(u){
+  let host="",path="";
+  try{const x=new URL(u);host=x.hostname.replace(/^www\./,"").toLowerCase();path=x.pathname.toLowerCase()}catch(e){return null}
+  try{
+    if(/wish|awish|playnix|medix|niramirus|kravaxxa|davioad|haxlopp|tryzendm|dumbalag|dhcplay|hglink/i.test(host))return await rStreamwish(u);
+    if(/streamtape/i.test(host))return await rStreamtape(u);
+    if(/voe/i.test(host)||/\/e\//.test(path))return await rVoe(u);
+  }catch(e){}
+  return null; // sin resolvedor: se usa el reproductor embebido
+}
+// ---- endpoints ----
+const E={
+  async catalog(q){
+    const t=q.get("type")||"movie",page=+(q.get("page")||1),g=q.get("genre")||"";
+    const path=g?`/generos/${g}`:t==="series"?"/series":t==="anime"?"/animes":"/peliculas";
+    return{items:posters(dom(await http(`${BASE()}${path}?page=${page}`))),page};
+  },
+  async search(q){
+    const s=q.get("q")||q.get("s")||"";
+    return posters(dom(await http(`${BASE()}/search?s=${encodeURIComponent(s)}`)));
+  },
+  async info(slug,type){
+    const d=dom(await http(`${BASE()}/${type==="movie"?"pelicula":"serie"}/${slug}`));
+    const title=txt(d.querySelector("h1.m-b-5"))||txt(d.querySelector(".font-size-26.font-weight-bold"));
+    if(!title)throw new Error("Contenido no encontrado");
+    const im=d.querySelector("img.img-fluid.m-b-15")||d.querySelector(".img-fluid.rounded");
+    const ym=txt(d.querySelector(".font-size-18.text-info")).match(/\d{4}/);
+    const info={id:slug,slug,title,originalTitle:txt(d.querySelector("p.text-opacity")),
+      synopsis:txt(d.querySelector(".text-large"))||txt(d.querySelector("#synopsis")),
+      poster:abs(im?im.getAttribute("src"):""),rating:txt(d.querySelector(".font-size-36.font-weight-bold"))||null,
+      year:ym?ym[0]:null,genres:[],cast:[],directors:[],type,provider:"pelisplus"};
+    d.querySelectorAll("a[href^='/generos/']").forEach(a=>{const n=txt(a);if(n)info.genres.push({name:n,slug:a.getAttribute("href").split("/").pop()})});
+    d.querySelectorAll(".sectionDetail").forEach(el=>{
+      const t=el.textContent;
+      if(t.includes("Director:"))el.querySelectorAll("a").forEach(a=>info.directors.push(txt(a)));
+      else if(t.includes("Elenco:"))el.querySelectorAll("a").forEach(a=>info.cast.push(txt(a)));
+    });
+    if(type==="movie"){info.servers=parseServers(d);return info}
+    info.seasons=[];
+    const epRe=/temporada\/(\d+)\/capitulo\/(\d+)/i,seasonDivs=[...d.querySelectorAll(".divseason")];
+    if(seasonDivs.length){
+      seasonDivs.forEach(el=>{
+        const st=txt(el),sn=(st.match(/\d+/)||[1])[0]*1,eps=[];
+        const ul=el.nextElementSibling;
+        if(ul&&ul.tagName==="UL")ul.querySelectorAll("a").forEach(a=>{
+          const h=a.getAttribute("href")||"",m=h.match(epRe);
+          if(m)eps.push({number:+m[2],title:txt(a)||`Episodio ${m[2]}`,url:abs(h),season:sn});
+        });
+        eps.sort((a,b)=>a.number-b.number);
+        info.seasons.push({number:sn,name:st||`Temporada ${sn}`,episodes:eps});
+      });
+    }
+    if(!info.seasons.some(s=>s.episodes.length)){
+      info.seasons=[];const map=new Map();
+      d.querySelectorAll("a[href*='/temporada/']").forEach(a=>{
+        const h=a.getAttribute("href")||"",m=h.match(epRe);if(!m)return;
+        const s=+m[1];if(!map.has(s))map.set(s,[]);
+        map.get(s).push({number:+m[2],title:txt(a)||`Episodio ${m[2]}`,url:abs(h),season:s});
+      });
+      [...map.entries()].forEach(([n,eps])=>{eps.sort((a,b)=>a.number-b.number);info.seasons.push({number:n,name:`Temporada ${n}`,episodes:eps})});
+    }
+    info.seasons.sort((a,b)=>a.number-b.number);
+    return info;
+  },
+  async servers(q){
+    const slug=q.get("slug"),s=q.get("season")||1,e=q.get("episode")||1;
+    const d=dom(await http(`${BASE()}/serie/${slug}/temporada/${s}/capitulo/${e}`));
+    return{servers:parseServers(d)};
+  },
+  async resolve(q){const u=q.get("url");return{embedUrl:u,directUrl:await resolveEmbed(u)}}
+};
+async function api(path){
+  const [p,qs]=path.split("?"),q=new URLSearchParams(qs||"");
+  try{
+    if(p==="/catalog")return await E.catalog(q);
+    if(p==="/search")return await E.search(q);
+    if(p.startsWith("/info/"))return await E.info(decodeURI(p.slice(6)),q.get("type")||"movie");
+    if(p==="/servers")return await E.servers(q);
+    if(p==="/resolve")return await E.resolve(q);
+    throw new Error("Ruta desconocida");
+  }catch(e){
+    if(e.name==="AbortError")throw new Error("El sitio tardó demasiado en responder");
+    if(e instanceof TypeError)throw new Error("Sin conexión a internet o el sitio no responde");
+    throw e;
+  }
+}
+// ===========================================================================
 const isFav=i=>S.favs.some(f=>f.slug===i.slug);
 function mini(i){return{slug:i.slug,title:i.title,poster:i.poster,rating:i.rating,type:i.type,provider:i.provider}}
 function poster(i){return i.poster?`<img loading="lazy" referrerpolicy="no-referrer" src="${esc(i.poster)}" alt="" onerror="this.remove()">`:""}
@@ -214,16 +422,17 @@ let homeData=null,heroItem=null,filter="all";
 const ROWS=[["movie","Películas populares","movie"],["series","Series populares","series"],["anime","Anime","anime"]];
 async function loadHome(){
   const v=$("#v-home");
-  if(!base()){v.innerHTML=setupHTML();bindSetup(v);return}
-  v.innerHTML=`<div class="top"><div class="logo">N<b>PELI NX</b></div></div><div class="hero skel"></div><div class="row"><div class="rail">${"<div class='card'><div class='p skel'></div></div>".repeat(6)}</div></div>`;
+  const wk=setTimeout(()=>{const w=$("#wake");if(w)w.textContent="Cargando catálogo…"},4000);
+  v.innerHTML=`<div class="top"><div class="logo">N<b>PELI NX</b></div></div><div class="hero skel"></div><div id="wake" class="empty" style="padding:14px 20px 0;font-size:12px"></div><div class="row"><div class="rail">${"<div class='card'><div class='p skel'></div></div>".repeat(6)}</div></div>`;
   try{
     const res=await Promise.allSettled(ROWS.map(r=>api(`/catalog?type=${r[0]}&page=1`)));
     homeData=ROWS.map((r,i)=>({title:r[1],type:r[2],items:res[i].status==="fulfilled"?reg((res[i].value.items||[]).map(x=>({...x,provider:x.provider||"pelisplus"}))):[]}));
     if(!homeData.some(d=>d.items.length))throw new Error(res.find(r=>r.status==="rejected")?.reason?.message||"Catálogo vacío");
     const pool=homeData.flatMap(d=>d.items).filter(i=>i.poster);
     heroItem=pool[Math.floor(Math.random()*pool.length)];
-    renderHome();
+    clearTimeout(wk);renderHome();
   }catch(e){
+    clearTimeout(wk);
     v.innerHTML=`<div class="top"><div class="logo">N<b>PELI NX</b></div></div><div class="empty" style="padding-top:35vh">${IC.film}<br>No se pudo cargar el catálogo<br><small>${esc(e.message)}</small><br><br><button class="btn" id="retry">Reintentar</button> <button class="btn alt" id="gset">Ajustes</button></div>`;
     $("#retry").onclick=loadHome;$("#gset").onclick=()=>tab("set");
   }
@@ -382,29 +591,19 @@ window.addEventListener("popstate",()=>{
   if($("#detail").classList.contains("on")){closeDetail();}
 });
 // ---------- SETTINGS ----------
-function setupHTML(){
-  return `<div class="top"><div class="logo">N<b>PELI NX</b></div></div><div class="set" style="padding-top:calc(90px + var(--sat))">
-  <h2 style="font-size:24px;margin-bottom:8px">Conecta tu catálogo</h2>
-  <p class="syn" style="color:var(--tx2)">Peli NX usa <b>PeliApi</b>. Pega la URL de tu servidor donde corre la API (por ejemplo <i>https://mi-api.onrender.com</i>).</p>
-  <div class="sg"><div class="fld"><label>URL de PeliApi</label><input id="apiurl" inputmode="url" autocapitalize="off" autocorrect="off" placeholder="https://tu-servidor.com"></div></div>
-  <button class="btn" id="apisave" style="width:100%">Conectar</button></div>`;
-}
-function bindSetup(root){
-  $("#apisave",root).onclick=()=>{let u=$("#apiurl",root).value.trim();if(!u)return toast("Escribe la URL");if(!/^https?:\/\//i.test(u))u="https://"+u;S.api=u.replace(/\/+$/,"");ls.set("nx_api",S.api);loadHome()};
-}
 function renderSettings(){
   const v=$("#v-set");
   v.innerHTML=`<div class="h1">Ajustes</div><div class="set">
-  <div class="sg"><div class="fld"><label>URL de PeliApi</label><input id="apiurl" value="${esc(S.api)}" inputmode="url" autocapitalize="off" autocorrect="off" placeholder="https://tu-servidor.com"><button class="btn" id="apisave">Guardar y probar</button></div></div>
+  <div class="sg"><div class="fld"><label>Dominio del catálogo (cámbialo si el sitio cambia de dirección)</label><input id="apiurl" value="${esc(S.dom||DEF_DOM)}" inputmode="url" autocapitalize="off" autocorrect="off" placeholder="${DEF_DOM}"><button class="btn" id="apisave">Guardar y probar</button></div></div>
   <div class="sg">
    <button class="si" id="sclr">${IC.trash}<span><b>Borrar “Continuar viendo”</b><small>${S.hist.length} elementos</small></span></button>
    <button class="si" id="sfav">${IC.heart}<span><b>Vaciar Mi lista</b><small>${S.favs.length} títulos</small></span></button>
   </div>
-  <div class="ver">Peli NX 1.0<br>Catálogo impulsado por <a>PeliApi</a> · creado por FxxMorgan<br>github.com/FxxMorgan/PeliApi</div></div>`;
+  <div class="ver">Peli NX 1.0</div></div>`;
   $("#apisave").onclick=async()=>{
-    let u=$("#apiurl").value.trim();if(!u)return toast("Escribe la URL");if(!/^https?:\/\//i.test(u))u="https://"+u;
-    S.api=u.replace(/\/+$/,"");ls.set("nx_api",S.api);toast("Probando conexión…");
-    try{await api("/genres",15000);toast("Conectado ✓");loadHome()}catch(e){toast("No conecta: "+e.message)}
+    let u=$("#apiurl").value.trim();if(!u)return toast("Escribe el dominio");if(!/^https?:\/\//i.test(u))u="https://"+u;
+    S.dom=u.replace(/\/+$/,"");ls.set("nx_dom",S.dom);toast("Probando conexión…");
+    try{const r=await api("/catalog?type=movie&page=1");if(!r.items.length)throw new Error("Sin resultados: revisa el dominio");toast("Conectado ✓");loadHome()}catch(e){toast(e.message)}
   };
   $("#sclr").onclick=()=>{S.hist=[];save();renderSettings();toast("Historial borrado")};
   $("#sfav").onclick=()=>{S.favs=[];save();renderSettings();toast("Lista vaciada")};
