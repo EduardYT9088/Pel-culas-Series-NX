@@ -38,7 +38,8 @@ jobs:
             "webDir": "www",
             "backgroundColor": "#000000",
             "server": { "androidScheme": "http", "cleartext": true },
-            "android": { "allowMixedContent": true }
+            "android": { "allowMixedContent": true },
+            "plugins": { "CapacitorHttp": { "enabled": true } }
           }
           EOF
           npx cap add android
