@@ -1,0 +1,418 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
+<meta name="theme-color" content="#000000">
+<title>Peli NX</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/hls.js/1.5.8/hls.min.js"></script>
+<style>
+:root{--bg:#000;--bg2:#0d0d0d;--card:#181818;--line:#262626;--red:#e50914;--red2:#b20710;--tx:#fff;--tx2:#b3b3b3;--tx3:#6b6b6b;--sab:env(safe-area-inset-bottom,0px);--sat:env(safe-area-inset-top,0px)}
+*{box-sizing:border-box;-webkit-tap-highlight-color:transparent;margin:0;padding:0}
+html,body{height:100%;background:var(--bg);color:var(--tx);font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;overflow:hidden}
+button{font:inherit;color:inherit;background:none;border:0;cursor:pointer}
+svg{width:24px;height:24px;fill:none;stroke:currentColor;stroke-width:2;stroke-linecap:round;stroke-linejoin:round;flex:none}
+#app{position:fixed;inset:0;display:flex;flex-direction:column}
+.view{position:absolute;inset:0 0 calc(62px + var(--sab)) 0;overflow-y:auto;overflow-x:hidden;display:none;-webkit-overflow-scrolling:touch}
+.view.on{display:block}
+.view::-webkit-scrollbar{display:none}
+/* NAV */
+nav{position:absolute;left:0;right:0;bottom:0;height:calc(62px + var(--sab));padding-bottom:var(--sab);background:rgba(0,0,0,.96);border-top:1px solid #111;display:flex;z-index:20}
+nav button{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:3px;color:var(--tx3);font-size:10px;letter-spacing:.3px}
+nav button.on{color:var(--red)}
+/* TOP */
+.top{position:absolute;top:0;left:0;right:0;z-index:5;display:flex;align-items:center;justify-content:space-between;padding:calc(14px + var(--sat)) 16px 30px;background:linear-gradient(#000c,transparent)}
+.logo{font-weight:900;font-size:26px;letter-spacing:-1px;color:var(--red);display:flex;align-items:baseline;gap:1px}
+.logo b{color:#fff;font-size:15px;letter-spacing:1px;font-weight:800;margin-left:6px}
+.chips{display:flex;gap:8px;padding:0 16px;position:absolute;top:calc(58px + var(--sat));z-index:5}
+.chip{border:1px solid #fff6;border-radius:20px;padding:5px 14px;font-size:13px;background:#0008;backdrop-filter:blur(6px)}
+.chip.on{background:#fff;color:#000;border-color:#fff}
+/* HERO */
+.hero{position:relative;height:72vh;min-height:430px;background:#111 center/cover no-repeat}
+.hero::after{content:"";position:absolute;inset:0;background:linear-gradient(transparent 40%,#000 98%),linear-gradient(#0009,transparent 30%)}
+.hero .in{position:absolute;left:0;right:0;bottom:14px;z-index:2;text-align:center;padding:0 16px}
+.hero h2{font-size:22px;font-weight:800;text-shadow:0 2px 12px #000;margin-bottom:6px}
+.hero .meta{font-size:12px;color:var(--tx2);margin-bottom:14px}
+.hero .meta span+span::before{content:"•";margin:0 6px}
+.hbtns{display:flex;align-items:center;justify-content:center;gap:26px}
+.hb{display:flex;flex-direction:column;align-items:center;gap:3px;font-size:11px;color:var(--tx2);min-width:54px}
+.play{background:#fff;color:#000;border-radius:5px;padding:9px 24px;display:flex;align-items:center;gap:8px;font-weight:700;font-size:15px}
+.play svg{fill:#000;stroke:#000;width:20px;height:20px}
+.skel{background:linear-gradient(90deg,#141414,#1f1f1f,#141414);background-size:200% 100%;animation:sk 1.2s infinite}
+@keyframes sk{to{background-position:-200% 0}}
+/* ROWS */
+.row{margin:16px 0 4px}
+.row h3{display:flex;align-items:center;justify-content:space-between;padding:0 16px;font-size:16px;font-weight:700;margin-bottom:9px}
+.row h3 svg{width:20px;height:20px;color:var(--tx2)}
+.rail{display:flex;gap:7px;overflow-x:auto;padding:0 16px;scroll-snap-type:x proximity}
+.rail::-webkit-scrollbar{display:none}
+.card{flex:none;width:112px;scroll-snap-align:start;position:relative}
+.card .p{width:112px;aspect-ratio:2/3;border-radius:5px;background:var(--card) center/cover;overflow:hidden;position:relative}
+.card .p img{width:100%;height:100%;object-fit:cover;display:block}
+.card .t{font-size:11px;color:var(--tx2);margin-top:5px;line-height:1.25;height:28px;overflow:hidden;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical}
+.badge{position:absolute;top:5px;left:5px;background:var(--red);font-size:9px;font-weight:800;padding:2px 5px;border-radius:3px;letter-spacing:.5px}
+.rate{position:absolute;bottom:5px;right:5px;background:#000b;font-size:10px;padding:2px 5px;border-radius:3px;display:flex;gap:3px;align-items:center}
+.rate::before{content:"★";color:#f5c518}
+.cont .card{width:150px}.cont .p{width:150px;aspect-ratio:16/10}
+.bar{position:absolute;left:0;right:0;bottom:0;height:3px;background:#fff3}.bar i{display:block;height:100%;background:var(--red)}
+.sp{height:28px}
+/* SEARCH */
+.sbar{position:sticky;top:0;z-index:6;background:#000;padding:calc(12px + var(--sat)) 14px 10px}
+.sbox{display:flex;align-items:center;gap:10px;background:#1a1a1a;border-radius:8px;padding:0 12px;height:44px}
+.sbox input{flex:1;background:none;border:0;outline:0;color:#fff;font-size:16px;min-width:0}
+.sbox svg{color:var(--tx2);width:20px;height:20px}
+.grid{display:grid;grid-template-columns:repeat(3,1fr);gap:10px 7px;padding:6px 14px 20px}
+.grid .card,.grid .card .p{width:100%}
+.empty{text-align:center;color:var(--tx3);padding:60px 30px;font-size:14px;line-height:1.5}
+.empty svg{width:44px;height:44px;margin-bottom:10px;opacity:.6}
+.h1{font-size:22px;font-weight:800;padding:calc(18px + var(--sat)) 16px 8px}
+/* DETAIL */
+.page{position:fixed;inset:0;background:#000;z-index:40;overflow-y:auto;transform:translateX(100%);transition:transform .28s cubic-bezier(.2,.8,.2,1);visibility:hidden}
+.page.on{transform:none;visibility:visible}
+.dtop{position:sticky;top:0;z-index:3;display:flex;justify-content:space-between;padding:calc(10px + var(--sat)) 10px 10px;background:linear-gradient(#000d,transparent)}
+.dtop button{width:40px;height:40px;display:grid;place-items:center;border-radius:50%;background:#0007}
+.dpos{margin-top:-60px;height:330px;background:#111 center top/cover;position:relative}
+.dpos::after{content:"";position:absolute;inset:0;background:linear-gradient(transparent 30%,#000)}
+.dbody{padding:0 16px 40px;margin-top:-30px;position:relative;z-index:2}
+.dbody h1{font-size:24px;font-weight:800;line-height:1.15;margin-bottom:8px}
+.tags{display:flex;flex-wrap:wrap;gap:8px 12px;font-size:12px;color:var(--tx2);margin-bottom:12px;align-items:center}
+.tag{border:1px solid #555;padding:1px 6px;border-radius:3px;font-size:11px}
+.match{color:#46d369;font-weight:700}
+.bigplay{width:100%;background:#fff;color:#000;border-radius:5px;padding:12px;font-weight:700;font-size:16px;display:flex;justify-content:center;align-items:center;gap:8px;margin-bottom:8px}
+.bigplay svg{fill:#000;stroke:#000;width:20px;height:20px}
+.ghost{width:100%;background:#262626;border-radius:5px;padding:11px;font-weight:600;display:flex;justify-content:center;gap:8px;align-items:center;margin-bottom:14px}
+.syn{font-size:14px;line-height:1.5;color:#ddd;margin-bottom:10px}
+.cast{font-size:12px;color:var(--tx3);line-height:1.5;margin-bottom:16px}.cast b{color:var(--tx2);font-weight:500}
+.shead{display:flex;align-items:center;justify-content:space-between;border-top:3px solid var(--red);padding-top:12px;margin:18px 0 8px;font-weight:700}
+select{background:#262626;color:#fff;border:0;border-radius:5px;padding:8px 10px;font-size:14px}
+.ep{display:flex;align-items:center;gap:12px;padding:10px 0;border-bottom:1px solid #151515;width:100%;text-align:left}
+.ep .n{width:26px;color:var(--tx2);font-size:18px;text-align:center}
+.ep .tt{flex:1;font-size:14px}
+.ep .pl{width:36px;height:36px;border:1.5px solid #888;border-radius:50%;display:grid;place-items:center}
+.ep .pl svg{width:16px;height:16px;fill:#fff}
+/* SHEET */
+.sheetbg{position:fixed;inset:0;background:#000a;z-index:60;display:none}
+.sheetbg.on{display:block}
+.sheet{position:absolute;left:0;right:0;bottom:0;background:#161616;border-radius:16px 16px 0 0;padding:8px 16px calc(18px + var(--sab));max-height:75vh;overflow-y:auto;animation:up .22s ease-out}
+@keyframes up{from{transform:translateY(100%)}}
+.grab{width:38px;height:4px;background:#444;border-radius:4px;margin:4px auto 12px}
+.sheet h4{font-size:16px;margin-bottom:4px}.sheet p.s{font-size:12px;color:var(--tx3);margin-bottom:10px}
+.srv{display:flex;align-items:center;justify-content:space-between;width:100%;padding:13px 4px;border-bottom:1px solid #222;text-align:left}
+.srv small{color:var(--tx3);font-size:12px;display:block;margin-top:2px}
+.pill{font-size:11px;padding:3px 9px;border-radius:12px;background:#2b2b2b}
+.pill.lat{background:#0c3b1b;color:#46d369}
+/* PLAYER */
+#player{position:fixed;inset:0;background:#000;z-index:80;display:none}
+#player.on{display:block}
+#player video,#player iframe{position:absolute;inset:0;width:100%;height:100%;border:0;background:#000}
+.pbar{position:absolute;top:0;left:0;right:0;z-index:3;display:flex;align-items:center;gap:10px;padding:calc(10px + var(--sat)) 10px 24px;background:linear-gradient(#000b,transparent);transition:opacity .25s}
+.pbar button{width:40px;height:40px;display:grid;place-items:center}
+.pbar span{font-size:13px;color:#ddd;flex:1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.spin{position:absolute;left:50%;top:50%;width:46px;height:46px;margin:-23px;border:4px solid #fff2;border-top-color:var(--red);border-radius:50%;animation:rot .8s linear infinite;z-index:2}
+@keyframes rot{to{transform:rotate(360deg)}}
+/* SETTINGS */
+.set{padding:0 16px 30px}
+.sg{background:#111;border-radius:10px;margin-bottom:14px;overflow:hidden}
+.si{display:flex;gap:14px;align-items:center;padding:14px;border-bottom:1px solid #1c1c1c;width:100%;text-align:left}
+.si:last-child{border:0}.si svg{color:var(--tx2)}
+.si b{display:block;font-weight:600;font-size:15px}.si small{color:var(--tx3);font-size:12px}
+.fld{padding:14px}.fld label{font-size:12px;color:var(--tx2);display:block;margin-bottom:6px}
+.fld input{width:100%;background:#1c1c1c;border:1px solid #2c2c2c;border-radius:7px;padding:12px;color:#fff;font-size:15px;outline:0}
+.fld input:focus{border-color:var(--red)}
+.btn{background:var(--red);border-radius:6px;padding:11px 18px;font-weight:700;margin-top:10px}
+.btn.alt{background:#262626}
+.ver{text-align:center;color:var(--tx3);font-size:11px;line-height:1.7;margin-top:8px}.ver a{color:var(--tx2)}
+.toast{position:fixed;left:50%;bottom:calc(80px + var(--sab));transform:translate(-50%,20px);background:#fff;color:#000;padding:10px 16px;border-radius:6px;font-size:13px;font-weight:600;opacity:0;transition:.25s;z-index:100;pointer-events:none;max-width:88vw;text-align:center}
+.toast.on{opacity:1;transform:translate(-50%,0)}
+/* SPLASH */
+#splash{position:fixed;inset:0;background:#000;z-index:200;display:grid;place-items:center;transition:opacity .5s}
+#splash .logo{font-size:64px;animation:pop .9s ease-out}
+#splash .logo b{font-size:34px}
+@keyframes pop{from{transform:scale(.6);opacity:0}}
+</style>
+</head>
+<body>
+<div id="splash"><div class="logo">N<b>PELI&nbsp;NX</b></div></div>
+<div id="app">
+  <section class="view on" id="v-home"></section>
+  <section class="view" id="v-search">
+    <div class="sbar"><div class="sbox"><svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="m21 21-4.3-4.3"/></svg><input id="q" placeholder="Series, películas, anime…" enterkeyhint="search" autocomplete="off"><button id="qx" hidden><svg viewBox="0 0 24 24"><path d="M18 6 6 18M6 6l12 12"/></svg></button></div></div>
+    <div id="sres"></div>
+  </section>
+  <section class="view" id="v-list"></section>
+  <section class="view" id="v-set"></section>
+  <nav>
+    <button data-t="home" class="on"><svg viewBox="0 0 24 24"><path d="M3 11 12 3l9 8v9a1 1 0 0 1-1 1h-5v-6H9v6H4a1 1 0 0 1-1-1z"/></svg>Inicio</button>
+    <button data-t="search"><svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="m21 21-4.3-4.3"/></svg>Buscar</button>
+    <button data-t="list"><svg viewBox="0 0 24 24"><path d="M19 21l-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z"/></svg>Mi lista</button>
+    <button data-t="set"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/></svg>Ajustes</button>
+  </nav>
+</div>
+
+<div class="page" id="detail"></div>
+<div class="sheetbg" id="sheetbg"><div class="sheet" id="sheet"></div></div>
+<div id="player"><div class="pbar"><button id="pback"><svg viewBox="0 0 24 24"><path d="M15 18l-6-6 6-6"/></svg></button><span id="ptitle"></span></div><div class="spin" id="pspin"></div></div>
+<div class="toast" id="toast"></div>
+
+<script>
+(()=>{
+"use strict";
+const $=(s,r=document)=>r.querySelector(s), $$=(s,r=document)=>[...r.querySelectorAll(s)];
+const IC={
+ play:'<svg viewBox="0 0 24 24"><path d="M6 4l14 8-14 8z"/></svg>',
+ plus:'<svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg>',
+ check:'<svg viewBox="0 0 24 24"><path d="M20 6 9 17l-5-5"/></svg>',
+ info:'<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="M12 16v-4M12 8h.01"/></svg>',
+ back:'<svg viewBox="0 0 24 24"><path d="M15 18l-6-6 6-6"/></svg>',
+ arrow:'<svg viewBox="0 0 24 24"><path d="M5 12h14M13 6l6 6-6 6"/></svg>',
+ film:'<svg viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M7 3v18M17 3v18M3 8h4M3 16h4M17 8h4M17 16h4"/></svg>',
+ share:'<svg viewBox="0 0 24 24"><circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><path d="m8.6 13.5 6.8 4M15.4 6.5l-6.8 4"/></svg>',
+ link:'<svg viewBox="0 0 24 24"><path d="M10 13a5 5 0 0 0 7 0l3-3a5 5 0 0 0-7-7l-1 1M14 11a5 5 0 0 0-7 0l-3 3a5 5 0 0 0 7 7l1-1"/></svg>',
+ trash:'<svg viewBox="0 0 24 24"><path d="M3 6h18M8 6V4h8v2M19 6l-1 14H6L5 6"/></svg>',
+ heart:'<svg viewBox="0 0 24 24"><path d="M20.8 4.6a5.5 5.5 0 0 0-7.8 0L12 5.7l-1-1.1a5.5 5.5 0 0 0-7.8 7.8l1 1.1L12 21l7.8-7.5 1-1.1a5.5 5.5 0 0 0 0-7.8z"/></svg>'
+};
+// ---------- storage ----------
+const ls={get(k,d){try{const v=localStorage.getItem(k);return v==null?d:JSON.parse(v)}catch(e){return d}},set(k,v){try{localStorage.setItem(k,JSON.stringify(v))}catch(e){}}};
+const S={api:ls.get("nx_api",""),favs:ls.get("nx_favs",[]),hist:ls.get("nx_hist",[]),cur:null,hls:null};
+const save=()=>{ls.set("nx_favs",S.favs);ls.set("nx_hist",S.hist)};
+// ---------- helpers ----------
+const esc=s=>String(s??"").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+const clean=t=>String(t||"").replace(/^VER\s+/i,"").replace(/\s*Online\s+Gratis.*$/i,"").replace(/\s*(Online|Espa[ñn]ol).*HD.*$/i,"").trim();
+const TYPE={movie:"Película",series:"Serie",anime:"Anime"};
+let tt;function toast(m){const t=$("#toast");t.textContent=m;t.classList.add("on");clearTimeout(tt);tt=setTimeout(()=>t.classList.remove("on"),2600)}
+function base(){return (S.api||"").replace(/\/+$/,"")}
+async function api(path,ms=40000){
+  if(!base())throw new Error("Configura la URL de tu PeliApi en Ajustes");
+  const c=new AbortController(),to=setTimeout(()=>c.abort(),ms);
+  try{
+    const r=await fetch(base()+"/api/v1/content"+path,{signal:c.signal});
+    const j=await r.json().catch(()=>({}));
+    if(!r.ok||j.success===false)throw new Error(j.error||j.message||("Error "+r.status));
+    return j.data;
+  }catch(e){if(e.name==="AbortError")throw new Error("Tiempo de espera agotado");throw e}
+  finally{clearTimeout(to)}
+}
+const isFav=i=>S.favs.some(f=>f.slug===i.slug);
+function mini(i){return{slug:i.slug,title:i.title,poster:i.poster,rating:i.rating,type:i.type,provider:i.provider}}
+function poster(i){return i.poster?`<img loading="lazy" referrerpolicy="no-referrer" src="${esc(i.poster)}" alt="" onerror="this.remove()">`:""}
+function cardHTML(i,extra=""){
+  return `<div class="card" data-slug="${esc(i.slug)}" data-type="${esc(i.type)}" data-prov="${esc(i.provider||"")}"><div class="p">${poster(i)}${i.type&&i.type!=="movie"?`<span class="badge">${i.type==="anime"?"ANIME":"SERIE"}</span>`:""}${i.rating?`<span class="rate">${esc(i.rating)}</span>`:""}${extra}</div><div class="t">${esc(clean(i.title))}</div></div>`;
+}
+const store=new Map(); // slug -> item
+function reg(list){list.forEach(i=>store.set(i.slug,i));return list}
+function bindCards(root){$$(".card",root).forEach(c=>c.onclick=()=>{const i=store.get(c.dataset.slug)||{slug:c.dataset.slug,type:c.dataset.type,provider:c.dataset.prov,title:""};openDetail(i)})}
+// ---------- tabs ----------
+function tab(t){
+  $$(".view").forEach(v=>v.classList.toggle("on",v.id==="v-"+t));
+  $$("nav button").forEach(b=>b.classList.toggle("on",b.dataset.t===t));
+  if(t==="list")renderList(); if(t==="set")renderSettings(); if(t==="home")renderContinue();
+  if(t==="search")setTimeout(()=>$("#q").focus(),50);
+}
+$$("nav button").forEach(b=>b.onclick=()=>tab(b.dataset.t));
+// ---------- HOME ----------
+let homeData=null,heroItem=null,filter="all";
+const ROWS=[["movie","Películas populares","movie"],["series","Series populares","series"],["anime","Anime","anime"]];
+async function loadHome(){
+  const v=$("#v-home");
+  if(!base()){v.innerHTML=setupHTML();bindSetup(v);return}
+  v.innerHTML=`<div class="top"><div class="logo">N<b>PELI NX</b></div></div><div class="hero skel"></div><div class="row"><div class="rail">${"<div class='card'><div class='p skel'></div></div>".repeat(6)}</div></div>`;
+  try{
+    const res=await Promise.allSettled(ROWS.map(r=>api(`/catalog?type=${r[0]}&page=1`)));
+    homeData=ROWS.map((r,i)=>({title:r[1],type:r[2],items:res[i].status==="fulfilled"?reg((res[i].value.items||[]).map(x=>({...x,provider:x.provider||"pelisplus"}))):[]}));
+    if(!homeData.some(d=>d.items.length))throw new Error(res.find(r=>r.status==="rejected")?.reason?.message||"Catálogo vacío");
+    const pool=homeData.flatMap(d=>d.items).filter(i=>i.poster);
+    heroItem=pool[Math.floor(Math.random()*pool.length)];
+    renderHome();
+  }catch(e){
+    v.innerHTML=`<div class="top"><div class="logo">N<b>PELI NX</b></div></div><div class="empty" style="padding-top:35vh">${IC.film}<br>No se pudo cargar el catálogo<br><small>${esc(e.message)}</small><br><br><button class="btn" id="retry">Reintentar</button> <button class="btn alt" id="gset">Ajustes</button></div>`;
+    $("#retry").onclick=loadHome;$("#gset").onclick=()=>tab("set");
+  }
+}
+function renderHome(){
+  const v=$("#v-home"),h=heroItem;
+  const rows=homeData.filter(d=>(filter==="all"||filter===d.type)&&d.items.length).map(d=>`<div class="row" data-more="${d.type}"><h3>${esc(d.title)}${IC.arrow}</h3><div class="rail">${d.items.map(i=>cardHTML(i)).join("")}</div></div>`).join("");
+  v.innerHTML=`<div class="top"><div class="logo">N<b>PELI NX</b></div></div>
+  <div class="chips">${[["all","Todo"],["movie","Películas"],["series","Series"],["anime","Anime"]].map(c=>`<button class="chip ${filter===c[0]?"on":""}" data-f="${c[0]}">${c[1]}</button>`).join("")}</div>
+  <div class="hero" style="background-image:url('${esc(h.poster)}')"><div class="in"><h2>${esc(clean(h.title))}</h2><div class="meta"><span>${TYPE[h.type]||""}</span>${h.rating?`<span>★ ${esc(h.rating)}</span>`:""}</div>
+  <div class="hbtns"><button class="hb" id="hfav">${isFav(h)?IC.check:IC.plus}<span>Mi lista</span></button><button class="play" id="hplay">${IC.play}Reproducir</button><button class="hb" id="hinfo">${IC.info}<span>Info</span></button></div></div></div>
+  <div id="cont"></div>${rows}<div class="sp"></div>`;
+  bindCards(v);renderContinue();
+  $$(".chip",v).forEach(c=>c.onclick=()=>{filter=c.dataset.f;renderHome()});
+  $("#hplay").onclick=()=>openDetail(h,true);$("#hinfo").onclick=()=>openDetail(h);
+  $("#hfav").onclick=()=>{toggleFav(h);$("#hfav").innerHTML=(isFav(h)?IC.check:IC.plus)+"<span>Mi lista</span>"};
+}
+function renderContinue(){
+  const c=$("#cont");if(!c)return;
+  if(!S.hist.length){c.innerHTML="";return}
+  c.innerHTML=`<div class="row cont"><h3>Continuar viendo</h3><div class="rail">${S.hist.map(i=>{reg([i]);return cardHTML(i,`<div class="bar"><i style="width:${Math.min(95,i.pct||8)}%"></i></div>`)}).join("")}</div></div>`;
+  bindCards(c);
+}
+// ---------- SEARCH ----------
+let st;
+$("#q").addEventListener("input",e=>{const q=e.target.value.trim();$("#qx").hidden=!q;clearTimeout(st);if(!q){$("#sres").innerHTML="";return}st=setTimeout(()=>doSearch(q),450)});
+$("#qx").onclick=()=>{$("#q").value="";$("#qx").hidden=true;$("#sres").innerHTML="";$("#q").focus()};
+async function doSearch(q){
+  const r=$("#sres");r.innerHTML=`<div class="grid">${"<div class='card'><div class='p skel'></div></div>".repeat(9)}</div>`;
+  try{
+    const d=reg(await api(`/search?q=${encodeURIComponent(q)}`));
+    if($("#q").value.trim()!==q)return;
+    r.innerHTML=d.length?`<div class="grid">${d.map(i=>cardHTML(i)).join("")}</div>`:`<div class="empty">${IC.film}<br>Sin resultados para “${esc(q)}”</div>`;
+    bindCards(r);
+  }catch(e){r.innerHTML=`<div class="empty">${esc(e.message)}</div>`}
+}
+// ---------- LIST ----------
+function renderList(){
+  const v=$("#v-list");
+  v.innerHTML=`<div class="h1">Mi lista</div>`+(S.favs.length?`<div class="grid">${S.favs.map(i=>{reg([i]);return cardHTML(i)}).join("")}</div>`:`<div class="empty">${IC.heart}<br>Aún no tienes nada guardado.<br>Toca “Mi lista” en cualquier título.</div>`);
+  bindCards(v);
+}
+function toggleFav(i){
+  if(isFav(i)){S.favs=S.favs.filter(f=>f.slug!==i.slug);toast("Eliminado de Mi lista")}
+  else{S.favs.unshift(mini(i));toast("Añadido a Mi lista")}
+  save();
+}
+// ---------- DETAIL ----------
+async function openDetail(item,autoplay=false){
+  const d=$("#detail");
+  d.innerHTML=`<div class="dtop"><button id="dback">${IC.back}</button></div><div class="dpos skel"></div><div class="dbody"><div class="skel" style="height:28px;width:70%;border-radius:4px"></div></div>`;
+  d.classList.add("on");d.scrollTop=0;history.pushState({d:1},"");
+  $("#dback").onclick=closeDetail;
+  try{
+    const prov=item.provider||"";
+    const info=await api(`/info/${encodeURI(item.slug)}?type=${item.type||"movie"}${prov?`&provider=${prov}`:""}`);
+    info.slug=info.slug||item.slug;info.provider=info.provider||prov||"pelisplus";info.type=info.type||item.type||"movie";
+    info.poster=info.poster||item.poster;info.title=info.title||item.title;info.rating=info.rating||item.rating;
+    S.cur=info;renderDetail(info);
+    if(autoplay)playDefault(info);
+  }catch(e){
+    d.innerHTML=`<div class="dtop"><button id="dback">${IC.back}</button></div><div class="empty" style="padding-top:30vh">${esc(e.message)}</div>`;$("#dback").onclick=closeDetail;
+  }
+}
+function closeDetail(){if($("#detail").classList.contains("on")){$("#detail").classList.remove("on");}}
+function renderDetail(i){
+  const d=$("#detail"),isSeries=i.type!=="movie";
+  const seasons=(i.seasons||[]).filter(s=>s.episodes&&s.episodes.length);
+  d.innerHTML=`<div class="dtop"><button id="dback">${IC.back}</button><button id="dshare">${IC.share}</button></div>
+  <div class="dpos" style="background-image:url('${esc(i.poster)}')"></div>
+  <div class="dbody"><h1>${esc(clean(i.title))}</h1>
+  <div class="tags">${i.rating?`<span class="match">★ ${esc(i.rating)}</span>`:""}${i.year?`<span>${esc(i.year)}</span>`:""}<span class="tag">${TYPE[i.type]||"HD"}</span><span class="tag">HD</span>${(i.genres||[]).slice(0,3).map(g=>`<span>${esc(g.name)}</span>`).join("")}</div>
+  <button class="bigplay" id="dplay">${IC.play}Reproducir</button>
+  <button class="ghost" id="dfav">${isFav(i)?IC.check:IC.plus} Mi lista</button>
+  <p class="syn">${esc(i.synopsis||"Sin sinopsis disponible.")}</p>
+  ${i.cast?.length?`<p class="cast"><b>Reparto:</b> ${esc(i.cast.slice(0,6).join(", "))}</p>`:""}
+  ${i.directors?.length?`<p class="cast"><b>Dirección:</b> ${esc(i.directors.join(", "))}</p>`:""}
+  ${isSeries?`<div class="shead"><span id="epcount"></span><select id="ssel">${seasons.map((s,k)=>`<option value="${k}">Temporada ${s.number}</option>`).join("")}</select></div><div id="eps"></div>`:""}
+  </div>`;
+  $("#dback").onclick=closeDetail;
+  $("#dshare").onclick=()=>{const u=i.url||"";if(navigator.share)navigator.share({title:clean(i.title),text:clean(i.title)+" en Peli NX",url:u}).catch(()=>{});else toast("Compartir no disponible")};
+  $("#dfav").onclick=()=>{toggleFav(i);$("#dfav").innerHTML=(isFav(i)?IC.check:IC.plus)+" Mi lista"};
+  $("#dplay").onclick=()=>playDefault(i);
+  if(isSeries){
+    if(!seasons.length){$("#eps").innerHTML=`<div class="empty">No hay episodios disponibles.</div>`;return}
+    const draw=()=>{
+      const s=seasons[+$("#ssel").value];$("#epcount").textContent=s.episodes.length+" episodios";
+      $("#eps").innerHTML=s.episodes.map(e=>`<button class="ep" data-s="${s.number}" data-e="${e.number}"><span class="n">${e.number}</span><span class="tt">${esc(e.title||"Episodio "+e.number)}</span><span class="pl">${IC.play}</span></button>`).join("");
+      $$(".ep").forEach(b=>b.onclick=()=>pickServer(i,+b.dataset.s,+b.dataset.e,b.querySelector(".tt").textContent));
+    };
+    $("#ssel").onchange=draw;draw();
+  }
+}
+function playDefault(i){
+  if(i.type==="movie")return pickServer(i);
+  const h=S.hist.find(x=>x.slug===i.slug&&x.s);
+  const s=h?h.s:(i.seasons?.find(s=>s.episodes?.length)?.number||1),e=h?h.e:(i.seasons?.find(s=>s.number===s)?.episodes?.[0]?.number||1);
+  pickServer(i,s,e,"Episodio "+e);
+}
+// ---------- SERVERS / PLAYER ----------
+function sheet(html){$("#sheet").innerHTML=`<div class="grab"></div>`+html;$("#sheetbg").classList.add("on")}
+$("#sheetbg").onclick=e=>{if(e.target.id==="sheetbg")$("#sheetbg").classList.remove("on")};
+async function pickServer(i,s,e,label){
+  sheet(`<h4>${esc(clean(i.title))}</h4><p class="s">${s?`Temporada ${s} · ${esc(label||"")}`:"Elige un servidor"}</p><div class="empty" style="padding:30px"><div class="spin" style="position:relative;margin:0 auto;left:0;top:0"></div></div>`);
+  try{
+    let servers;
+    if(s){const r=await api(`/servers?slug=${encodeURI(i.slug)}&season=${s}&episode=${e}&provider=${i.provider||""}`);servers=r.servers||[]}
+    else servers=i.servers||[];
+    if(!servers.length){sheet(`<h4>Sin servidores</h4><p class="s">No hay fuentes disponibles para este título ahora mismo.</p>`);return}
+    const order=["streamwish","voesx","streamtape","vidhide","netu"];
+    servers.sort((a,b)=>(/latino/i.test(b.language)-/latino/i.test(a.language))||(order.indexOf(a.server)<0?9:order.indexOf(a.server))-(order.indexOf(b.server)<0?9:order.indexOf(b.server)));
+    sheet(`<h4>${esc(clean(i.title))}</h4><p class="s">${s?`Temporada ${s} · ${esc(label||"")}`:"Elige un servidor"}</p>`+servers.map((v,k)=>`<button class="srv" data-k="${k}"><span>${esc(v.name)}<small>Directo si es posible · si no, embebido</small></span><span class="pill ${/latino/i.test(v.language)?"lat":""}">${esc(v.language||"")}</span></button>`).join(""));
+    $$(".srv",$("#sheet")).forEach(b=>b.onclick=()=>{$("#sheetbg").classList.remove("on");play(i,servers[+b.dataset.k],s,e,label)});
+  }catch(err){sheet(`<h4>Error</h4><p class="s">${esc(err.message)}</p>`)}
+}
+function stopPlayer(){
+  const p=$("#player");p.classList.remove("on");
+  if(S.hls){try{S.hls.destroy()}catch(e){}S.hls=null}
+  $$("video,iframe",p).forEach(n=>{try{n.pause&&n.pause()}catch(e){}n.remove()});
+  $("#pspin").style.display="";
+}
+function addHist(i,s,e,v){
+  const m=mini(i);m.s=s;m.e=e;m.pct=v&&v.duration?Math.round(v.currentTime/v.duration*100):8;
+  S.hist=[m,...S.hist.filter(x=>x.slug!==i.slug)].slice(0,15);save();
+}
+async function play(i,srv,s,e,label){
+  const p=$("#player"),sp=$("#pspin");
+  stopPlayer();p.classList.add("on");sp.style.display="";
+  $("#ptitle").textContent=clean(i.title)+(s?` · T${s}:E${e}`:"")+" — "+srv.name;
+  history.pushState({p:1},"");
+  addHist(i,s,e);
+  const embed=()=>{
+    sp.style.display="none";
+    const f=document.createElement("iframe");f.src=srv.embedUrl;f.allow="autoplay; fullscreen; encrypted-media; picture-in-picture";f.setAttribute("allowfullscreen","");f.referrerPolicy="no-referrer-when-downgrade";p.appendChild(f);
+  };
+  try{
+    const r=await api(`/resolve?url=${encodeURIComponent(srv.embedUrl)}`,25000);
+    const u=r.directUrl;if(!u)throw new Error("sin enlace");
+    if(!p.classList.contains("on"))return;
+    const v=document.createElement("video");v.controls=true;v.autoplay=true;v.playsInline=true;v.setAttribute("playsinline","");
+    p.insertBefore(v,p.firstChild);
+    const fail=()=>{v.remove();if(S.hls){S.hls.destroy();S.hls=null}embed()};
+    v.addEventListener("playing",()=>sp.style.display="none");
+    v.addEventListener("waiting",()=>sp.style.display="");
+    v.addEventListener("timeupdate",()=>{if(v.currentTime&&Math.round(v.currentTime)%15===0)addHist(i,s,e,v)});
+    if(/\.m3u8/i.test(u)&&window.Hls&&Hls.isSupported()){
+      const h=new Hls({maxBufferLength:40});S.hls=h;h.loadSource(u);h.attachMedia(v);
+      h.on(Hls.Events.ERROR,(_,d)=>{if(d.fatal)fail()});
+    }else{v.src=u;v.addEventListener("error",fail,{once:true})}
+  }catch(err){embed()}
+}
+$("#pback").onclick=()=>history.back();
+window.addEventListener("popstate",()=>{
+  if($("#player").classList.contains("on")){stopPlayer();renderContinue();return}
+  if($("#sheetbg").classList.contains("on")){$("#sheetbg").classList.remove("on");return}
+  if($("#detail").classList.contains("on")){closeDetail();}
+});
+// ---------- SETTINGS ----------
+function setupHTML(){
+  return `<div class="top"><div class="logo">N<b>PELI NX</b></div></div><div class="set" style="padding-top:calc(90px + var(--sat))">
+  <h2 style="font-size:24px;margin-bottom:8px">Conecta tu catálogo</h2>
+  <p class="syn" style="color:var(--tx2)">Peli NX usa <b>PeliApi</b>. Pega la URL de tu servidor donde corre la API (por ejemplo <i>https://mi-api.onrender.com</i>).</p>
+  <div class="sg"><div class="fld"><label>URL de PeliApi</label><input id="apiurl" inputmode="url" autocapitalize="off" autocorrect="off" placeholder="https://tu-servidor.com"></div></div>
+  <button class="btn" id="apisave" style="width:100%">Conectar</button></div>`;
+}
+function bindSetup(root){
+  $("#apisave",root).onclick=()=>{let u=$("#apiurl",root).value.trim();if(!u)return toast("Escribe la URL");if(!/^https?:\/\//i.test(u))u="https://"+u;S.api=u.replace(/\/+$/,"");ls.set("nx_api",S.api);loadHome()};
+}
+function renderSettings(){
+  const v=$("#v-set");
+  v.innerHTML=`<div class="h1">Ajustes</div><div class="set">
+  <div class="sg"><div class="fld"><label>URL de PeliApi</label><input id="apiurl" value="${esc(S.api)}" inputmode="url" autocapitalize="off" autocorrect="off" placeholder="https://tu-servidor.com"><button class="btn" id="apisave">Guardar y probar</button></div></div>
+  <div class="sg">
+   <button class="si" id="sclr">${IC.trash}<span><b>Borrar “Continuar viendo”</b><small>${S.hist.length} elementos</small></span></button>
+   <button class="si" id="sfav">${IC.heart}<span><b>Vaciar Mi lista</b><small>${S.favs.length} títulos</small></span></button>
+  </div>
+  <div class="ver">Peli NX 1.0<br>Catálogo impulsado por <a>PeliApi</a> · creado por FxxMorgan<br>github.com/FxxMorgan/PeliApi</div></div>`;
+  $("#apisave").onclick=async()=>{
+    let u=$("#apiurl").value.trim();if(!u)return toast("Escribe la URL");if(!/^https?:\/\//i.test(u))u="https://"+u;
+    S.api=u.replace(/\/+$/,"");ls.set("nx_api",S.api);toast("Probando conexión…");
+    try{await api("/genres",15000);toast("Conectado ✓");loadHome()}catch(e){toast("No conecta: "+e.message)}
+  };
+  $("#sclr").onclick=()=>{S.hist=[];save();renderSettings();toast("Historial borrado")};
+  $("#sfav").onclick=()=>{S.favs=[];save();renderSettings();toast("Lista vaciada")};
+}
+// ---------- boot ----------
+loadHome();
+setTimeout(()=>{const s=$("#splash");s.style.opacity=0;setTimeout(()=>s.remove(),500)},900);
+})();
+</script>
+</body>
+</html>
