@@ -1,1 +1,63 @@
+name: Build Peli NX APK
 
+on:
+  push:
+    branches: [main, master]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Descargar código
+        uses: actions/checkout@v4
+
+      - name: Node 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Java 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+
+      - name: Preparar proyecto Capacitor
+        run: |
+          mkdir -p www
+          cp index.html www/index.html
+          cat > package.json <<'EOF'
+          {"name":"peli-nx","version":"1.0.0","private":true}
+          EOF
+          npm i @capacitor/core@6 @capacitor/cli@6 @capacitor/android@6
+          cat > capacitor.config.json <<'EOF'
+          {
+            "appId": "com.pelinx.app",
+            "appName": "Peli NX",
+            "webDir": "www",
+            "backgroundColor": "#000000",
+            "server": { "androidScheme": "http", "cleartext": true },
+            "android": { "allowMixedContent": true }
+          }
+          EOF
+          npx cap add android
+          npx cap sync android
+
+      - name: Estilo nativo (barras negras, pantalla negra al iniciar)
+        run: |
+          f=android/app/src/main/res/values/styles.xml
+          sed -i 's#</style>#    <item name="android:statusBarColor">\#000000</item>\n        <item name="android:navigationBarColor">\#000000</item>\n        <item name="android:windowBackground">\#000000</item>\n    </style>#' $f || true
+
+      - name: Compilar APK
+        working-directory: android
+        run: |
+          chmod +x gradlew
+          ./gradlew assembleDebug --no-daemon
+
+      - name: Subir APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: PeliNX-APK
+          path: android/app/build/outputs/apk/debug/app-debug.apk
+          if-no-files-found: error
