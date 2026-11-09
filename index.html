@@ -52,6 +52,19 @@ nav button.on svg{color:var(--a2)}
 .pill.star{color:#ffd166}
 .pill.star::before{content:"★ "}
 .hact{display:flex;gap:10px;justify-content:center}
+#rcover{position:fixed;inset:0;background:#07070f;z-index:400;display:none}#rcover.on{display:block}
+#updov{position:fixed;inset:0;z-index:300;background:radial-gradient(circle at 50% 18%,#231b52,var(--bg) 62%);display:none;overflow:auto}
+#updov.on{display:block}
+#updov .uw{min-height:100%;max-width:480px;margin:0 auto;display:flex;flex-direction:column;justify-content:center;gap:18px;padding:calc(var(--sat) + 30px) 22px calc(var(--sab) + 26px);text-align:center}
+#updov .ub{align-self:center;padding:6px 12px;border-radius:99px;background:rgba(255,79,123,.14);border:1px solid rgba(255,79,123,.45);color:#ff7a9a;font-size:11.5px;font-weight:800;letter-spacing:.06em}
+#updov h1{font-size:54px;font-weight:900;line-height:1.05;background:var(--grad);-webkit-background-clip:text;background-clip:text;color:transparent}
+#updov .uc{color:var(--tx2);font-size:14px}
+#updov .un{text-align:left;background:var(--card);border:1px solid var(--line);border-radius:16px;padding:14px 16px;font-size:13.5px;line-height:1.5;color:#d9d6f5;max-height:30vh;overflow:auto}
+#updov .un ul{margin:6px 0 0;padding-left:18px}
+#updov .upr{font-size:12.5px;font-weight:700;color:var(--tx2)}
+#updov .ubar{height:8px;border-radius:9px;background:var(--card2);overflow:hidden;margin-bottom:8px}#updov .ubar i{display:block;height:100%;width:0;background:var(--grad);transition:width .2s}
+#updov .btn{width:100%;height:54px;font-size:16px;border:0}
+#updov .btn[disabled]{opacity:.6}
 .btn{display:inline-flex;align-items:center;justify-content:center;gap:8px;background:var(--grad);color:#fff;font-weight:600;font-size:15px;padding:13px 26px;border-radius:16px;box-shadow:0 10px 28px #7c5cff55}
 .btn svg{width:18px;height:18px;fill:#fff;stroke:#fff}
 .btn.sec{background:var(--card2);box-shadow:none;border:1px solid var(--line);padding:13px 15px}
@@ -257,6 +270,8 @@ input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:16px;heigh
   <div id="pskip"></div>
   <button id="punlock"><svg viewBox="0 0 24 24"><rect x="4" y="11" width="16" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 7.5-2"/></svg>Desbloquear</button>
 </div>
+<div id="rcover"></div>
+<div id="updov"><div class="uw"><span class="ub">ACTUALIZACIÓN OBLIGATORIA</span><h1 id="uver">v1</h1><p class="uc" id="ucur"></p><div class="un"><b>Novedades</b><div id="unotes"></div></div><div class="upr" id="uprg" style="display:none"><div class="ubar"><i id="ubar"></i></div><span id="uptx">Descargando…</span></div><button class="btn" id="ugo">Actualizar ahora</button></div></div>
 <div class="toast" id="toast"></div>
 <script>
 (()=>{
@@ -915,12 +930,17 @@ async function goNext(n){
   const c=P.ctx;P.tok++;teardown();spin(true,"Cargando episodio…");
   await startPlay(c.info,n.s,n.e,P.lang,true);
 }
-function closePlayer(){
+async function closePlayer(){
   if(!P.el.classList.contains("on"))return;
+  const cv=$("#rcover");cv.classList.add("on"); // tapa negra mientras la pantalla gira, evita el salto a 1/4 de pantalla
   saveProgress();P.tok++;teardown();spin(false);clearTimeout(P.hideT);
   P.el.classList.remove("on","rot","emb");document.body.classList.remove("rotmode");closeSheet();
-  try{if(document.fullscreenElement)document.exitFullscreen()}catch(e){}
-  orient("portrait");renderContinue();
+  try{if(document.fullscreenElement)await document.exitFullscreen()}catch(e){}
+  await orient("portrait");
+  for(let i=0;i<20&&innerHeight<=innerWidth;i++)await new Promise(r=>setTimeout(r,50));
+  await new Promise(r=>setTimeout(r,120));
+  renderContinue();
+  cv.classList.remove("on");
 }
 function historyBackIfPlayer(){if(P.el.classList.contains("on"))history.back()}
 // controles
@@ -971,18 +991,63 @@ function renderSettings(){
   <div class="sg">
    <button class="si" id="sclr">${IC.trash}<span><b>Borrar “Continuar viendo”</b><small>${S.hist.length} elementos</small></span></button>
    <button class="si" id="sfav">${IC.heart}<span><b>Vaciar Mi lista</b><small>${S.favs.length} títulos</small></span></button>
-  </div><div class="ver">Tramoya 1.0</div></div>`;
+  </div><div class="sg"><button class="si" id="supd">${IC.heart}<span><b>Buscar actualizaciones</b><small>Versión instalada: v${APP_VER}</small></span></button></div><div class="ver">Tramoya v${APP_VER}</div></div>`;
   $("#slang").value=S.lang;$("#slang").onchange=e=>{S.lang=e.target.value;ls.set("tr_lang",S.lang);toast("Guardado")};
   $("#apisave").onclick=async()=>{
     let u=$("#apiurl").value.trim();if(!u)return toast("Escribe el dominio");if(!/^https?:\/\//i.test(u))u="https://"+u;
     S.dom=u.replace(/\/+$/,"");ls.set("tr_dom",S.dom);toast("Probando conexión…");
     try{const r=await api("/catalog?type=movie&page=1");if(!r.items.length)throw new Error("Sin resultados: revisa el dominio");toast("Conectado ✓");X.items=[];X.done=false;X.dirty=true;loadHome()}catch(e){toast(e.message)}
   };
+  $("#supd").onclick=()=>checkUpdate(true);
   $("#sclr").onclick=()=>{S.hist=[];save();renderSettings();toast("Historial borrado")};
   $("#sfav").onclick=()=>{S.favs=[];save();renderSettings();toast("Lista vaciada")};
 }
+// ---------- actualización obligatoria ----------
+const APP_VER="__APP_VERSION__".startsWith("__")?"0.0.0-dev":"__APP_VERSION__";
+const REPO="EduardYT9088/Pel-culas-Series-NX";
+const capP=n=>{try{const c=window.Capacitor;return c&&c.isNativePlatform&&c.isNativePlatform()?((c.Plugins&&c.Plugins[n])||c.registerPlugin(n)):null}catch(e){return null}};
+const cmpVer=(a,b)=>{const x=String(a).split(/[.-]/).map(n=>parseInt(n)||0),y=String(b).split(/[.-]/).map(n=>parseInt(n)||0);for(let i=0;i<3;i++){if((x[i]||0)!==(y[i]||0))return(x[i]||0)-(y[i]||0)}return 0};
+let UPD=null;
+async function checkUpdate(manual){
+  if(APP_VER.includes("dev")){if(manual)toast("Versión de prueba: instala el APK para buscar actualizaciones");return false}
+  try{
+    const r=await Promise.race([CAPH.get({url:`https://api.github.com/repos/${REPO}/releases/latest`,headers:{"Accept":"application/vnd.github+json","User-Agent":"Tramoya-App"},connectTimeout:12000,readTimeout:12000}),new Promise((_,j)=>setTimeout(()=>j(new Error("timeout")),14000))]);
+    const d=typeof r.data==="string"?JSON.parse(r.data):r.data;
+    const ver=String(d.tag_name||"").replace(/^v/i,"");
+    if(!ver||cmpVer(ver,APP_VER)<=0){if(manual)toast(`Ya tienes la última versión (v${APP_VER})`);return false}
+    const apk=(d.assets||[]).find(a=>/\.apk$/i.test(a.name));
+    if(!apk){if(manual)toast("La nueva versión aún se está publicando");return false}
+    UPD={ver,notes:d.body||"",url:apk.browser_download_url,size:apk.size};showUpdate();return true;
+  }catch(e){if(manual)toast("No se pudo buscar actualizaciones");return false}
+}
+function showUpdate(){
+  const u=UPD;$("#uver").textContent="v"+u.ver;
+  $("#ucur").textContent=`Tienes la v${APP_VER}`+(u.size?` · ${(u.size/1048576).toFixed(1)} MB`:"");
+  const ls2=String(u.notes||"").split("\n").map(l=>l.trim()).filter(l=>l&&!/^(co-authored-by|claude-session|signed-off-by)/i.test(l));
+  $("#unotes").innerHTML=ls2.length?"<ul>"+ls2.map(l=>`<li>${esc(l.replace(/^[-•*]\s*/,""))}</li>`).join("")+"</ul>":"<p>Mejoras y correcciones.</p>";
+  $("#uprg").style.display="none";$("#ugo").disabled=false;$("#ugo").textContent="Actualizar ahora";
+  $("#updov").classList.add("on");history.pushState({u:1},"");
+}
+$("#ugo").onclick=async()=>{
+  const u=UPD,FS=capP("Filesystem"),FO=capP("FileOpener");
+  $("#ugo").disabled=true;$("#ugo").textContent="Descargando…";$("#uprg").style.display="block";$("#ubar").style.width="0%";$("#uptx").textContent="Preparando descarga…";
+  if(FS&&FO){
+    let hd=null;try{hd=await FS.addListener("progress",p=>{const pc=p.contentLength?Math.round(p.bytes/p.contentLength*100):0;$("#ubar").style.width=pc+"%";$("#uptx").textContent=`Descargando… ${pc}%`})}catch(e){}
+    try{
+      const res=await FS.downloadFile({url:u.url,path:"tramoya-update.apk",directory:"CACHE",progress:true,recursive:true});
+      let path=res&&res.path;if(!path||!/^file:|^\//.test(path)){const g=await FS.getUri({path:"tramoya-update.apk",directory:"CACHE"});path=g.uri}
+      $("#ubar").style.width="100%";$("#uptx").textContent="Listo. Confirma la instalación en la ventana de Android.";
+      await FO.openFile({path,mimeType:"application/vnd.android.package-archive"});
+      $("#ugo").disabled=false;$("#ugo").textContent="Instalar";return;
+    }catch(e){$("#uptx").textContent="No se pudo instalar desde la app. Se abrirá la descarga en el navegador."}
+    finally{try{hd&&hd.remove&&hd.remove()}catch(e){}}
+  }
+  setTimeout(()=>{window.open(u.url,"_system");$("#ugo").disabled=false;$("#ugo").textContent="Descargar de nuevo"},900);
+};
+setTimeout(()=>checkUpdate(false),2500);
 // ---------- navegación atrás ----------
 addEventListener("popstate",()=>{
+  if($("#updov").classList.contains("on")){history.pushState({u:1},"");return}
   if(P.el.classList.contains("on")){closePlayer();return}
   if($("#sheetbg").classList.contains("on")){closeSheet();history.pushState({d:1},"");return}
   if($("#detail").classList.contains("on"))closeDetail();
