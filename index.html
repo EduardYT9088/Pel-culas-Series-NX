@@ -395,27 +395,31 @@ function swMirror(u){
     return"https://"+pool[Math.floor(Math.random()*pool.length)]+x.pathname+x.search;
   }catch(e){return u}
 }
+const DG=[];const dg=t=>{try{DG.push(t);if(DG.length>40)DG.shift()}catch(e){}};
 async function rStreamwish(u){
-  const mirror=swMirror(u);let page=mirror,html;
-  try{html=await http(mirror,{ua:UAFF,referer:mirror})}catch(e){page=u;html=await http(u,{ua:UAFF,referer:u})}
-  // junta el código empaquetado de todos los <script> y también el HTML plano
-  const texts=[];
-  html.split(/<script/i).forEach(b=>{if(/eval\(function\(p,a,c,k,e,d\)/.test(b)){const un=unpack(b.slice(b.indexOf("eval(function(p,a,c,k,e,d)")));if(un)texts.push(un)}});
-  texts.push(html);
-  let l=null;
-  for(const t of texts){
-    const got={};let m;const re=/["']?(hls[1-4])["']?\s*:\s*["']([^"']+)["']/gi;
-    while((m=re.exec(t)))got[m[1].toLowerCase()]=m[2].replace(/\\\//g,"/").replace(/\\u0026/g,"&");
-    l=got.hls4||got.hls3||got.hls1||got.hls2||null;
-    if(l)break;
+  const tries=[swMirror(u),swMirror(u),u];
+  for(const page of tries){
+    let html;
+    try{html=await http(page,{ua:UAFF,referer:page,ms:9000})}catch(e){dg("streamwish: "+((e&&e.message)||"sin conexión"));continue}
+    const texts=[];
+    html.split(/<script/i).forEach(b=>{if(/eval\(function\(p,a,c,k,e,d\)/.test(b)){const un=unpack(b.slice(b.indexOf("eval(function(p,a,c,k,e,d)")));if(un)texts.push(un)}});
+    texts.push(html);
+    let l=null;
+    for(const t of texts){
+      const got={};let m;const re=/["']?(hls[1-4])["']?\s*:\s*["']([^"']+)["']/gi;
+      while((m=re.exec(t)))got[m[1].toLowerCase()]=m[2].replace(/\\\//g,"/").replace(/\\u0026/g,"&");
+      l=got.hls4||got.hls3||got.hls1||got.hls2||null;
+      if(l)break;
+    }
+    if(!l){for(const t of texts){const f=findMedia(t);if(f){l=f;break}}}
+    if(!l){dg("streamwish: la página no trae enlace de video"+(/captcha|cloudflare|just a moment/i.test(html)?" (verificación)":""));continue}
+    const master=/^https?:/i.test(l)?l:new URL(l,page).href;
+    try{
+      const pl=await http(master,{ua:"Mozilla/5.0",referer:page});
+      return bestQuality(pl,master.slice(0,master.lastIndexOf("/")+1))||master;
+    }catch(e){return master}
   }
-  if(!l){for(const t of texts){const f=findMedia(t);if(f){l=f;break}}}
-  if(!l)return null;
-  const master=/^https?:/i.test(l)?l:new URL(l,page).href;
-  try{
-    const pl=await http(master,{ua:"Mozilla/5.0",referer:page});
-    return bestQuality(pl,master.slice(0,master.lastIndexOf("/")+1))||master;
-  }catch(e){return master}
+  return null;
 }
 async function rStreamtape(u){
   const html=await http(u,{ua:UAFF,ms:9000});
@@ -467,8 +471,8 @@ async function resolveEmbed(u){
     else if(/streamtape/i.test(host))r=await rStreamtape(u).catch(()=>null);
     else if(/voe/i.test(host))r=await rVoe(u).catch(()=>null);
     if(r)return r;
-    return await rGeneric(u); // respaldo para cualquier servidor
-  }catch(e){}
+    const g=await rGeneric(u);if(!g)dg((host||"servidor")+": sin enlace de video");return g; // respaldo para cualquier servidor
+  }catch(e){dg((host||"servidor")+": "+((e&&e.message)||"error"))}
   return null; // último recurso: reproductor embebido
 }
 // ---- endpoints ----
@@ -538,7 +542,7 @@ const E={
     const d=dom(await http(`${BASE()}/serie/${slug}/temporada/${s}/capitulo/${e}`));
     return{servers:parseServers(d)};
   },
-  async resolve(q){const u=q.get("url");return{embedUrl:u,directUrl:await resolveEmbed(u)}}
+  async resolve(q){const u=q.get("url");return{embedUrl:u,directUrl:await resolveEmbed(u),diag:DG.slice(-6)}}
 };
 async function api(path){
   const [p,qs]=path.split("?"),q=new URLSearchParams(qs||"");
@@ -787,7 +791,7 @@ function hideUI(){clearTimeout(P.hideT);$("#pui").classList.remove("show")}
 function teardown(){
   if(P.hls){try{P.hls.destroy()}catch(e){}P.hls=null}
   $$("video,iframe",P.el).forEach(n=>{try{n.pause&&n.pause();n.removeAttribute("src");n.load&&n.load()}catch(e){}n.remove()});
-  P.v=null;P.el.classList.remove("emb");
+  P.v=null;P.el.classList.remove("emb");{const e=$("#perr");if(e)e.remove()}
 }
 function nextEp(){
   const ctx=P.ctx;if(!ctx||!ctx.s)return null;
@@ -839,7 +843,18 @@ async function playFrom(i,startAt){
     if(ok){P.idx=j.k;$("#psrvb").textContent=j.srv.name;spin(false);return}
   }
   if(my!==P.tok)return;
-  embedFallback(P.list[Math.min(i,P.list.length-1)]);
+  playError(i);
+}
+function playError(i){
+  teardown();spin(false);
+  const old=$("#perr");if(old)old.remove();
+  const d=document.createElement("div");d.id="perr";
+  d.style.cssText="position:absolute;inset:0;z-index:6;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:12px;padding:24px;text-align:center;background:#000d;color:#fff;font-size:13px";
+  const why=[...new Set(DG.slice(-8))].map(x=>"• "+x).join("<br>");
+  d.innerHTML='<b style="font-size:16px">No se pudo sacar el video directo</b><div style="opacity:.7;max-width:420px;text-align:left">'+(why||"Ningún servidor respondió.")+'</div><div style="display:flex;gap:10px"><button id="perr1" style="padding:10px 16px;border-radius:12px;border:0;background:linear-gradient(90deg,#7c5cff,#18c8e8);color:#fff;font-weight:700">Reintentar</button><button id="perr2" style="padding:10px 16px;border-radius:12px;border:1px solid #ffffff44;background:none;color:#fff">Reproductor web</button></div>';
+  P.el.appendChild(d);showUI(true);
+  $("#perr1").onclick=()=>{d.remove();DG.length=0;playFrom(i,0)};
+  $("#perr2").onclick=()=>{d.remove();embedFallback(P.list[Math.min(i,P.list.length-1)])};
 }
 function embedFallback(srv){
   teardown();spin(false);
