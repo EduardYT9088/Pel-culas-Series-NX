@@ -396,11 +396,12 @@ function swMirror(u){
   }catch(e){return u}
 }
 const DG=[];const dg=t=>{try{DG.push(t);if(DG.length>40)DG.shift()}catch(e){}};
-async function rStreamwish(u){
-  const tries=[swMirror(u),swMirror(u),u];
+async function rStreamwish(u,direct){
+  const tries=direct?[u,u]:[swMirror(u),swMirror(u),u];
+  const lbl=(()=>{try{return new URL(u).hostname.replace(/^www\./,"")}catch(e){return "servidor"}})();
   for(const page of tries){
     let html;
-    try{html=await http(page,{ua:UAFF,referer:page,ms:9000})}catch(e){dg("streamwish: "+((e&&e.message)||"sin conexión"));continue}
+    try{html=await http(page,{ua:UAFF,referer:page,ms:20000})}catch(e){dg(lbl+": "+((e&&e.message)||"sin conexión"));continue}
     const texts=[];
     html.split(/<script/i).forEach(b=>{if(/eval\(function\(p,a,c,k,e,d\)/.test(b)){const un=unpack(b.slice(b.indexOf("eval(function(p,a,c,k,e,d)")));if(un)texts.push(un)}});
     texts.push(html);
@@ -412,7 +413,7 @@ async function rStreamwish(u){
       if(l)break;
     }
     if(!l){for(const t of texts){const f=findMedia(t);if(f){l=f;break}}}
-    if(!l){dg("streamwish: la página no trae enlace de video"+(/captcha|cloudflare|just a moment/i.test(html)?" (verificación)":""));continue}
+    if(!l){dg(lbl+": la página no trae enlace de video"+(/captcha|cloudflare|just a moment/i.test(html)?" (verificación)":""));continue}
     const master=/^https?:/i.test(l)?l:new URL(l,page).href;
     try{
       const pl=await http(master,{ua:"Mozilla/5.0",referer:page});
@@ -444,7 +445,8 @@ function findMedia(text){
   return good.find(u=>/\.m3u8/i.test(u))||good[0]||null;
 }
 async function rGeneric(u,depth=0){
-  const html=await http(u,{referer:BASE()+"/",ua:UAFF,ms:9000});
+  let ref;try{ref=new URL(u).origin+"/"}catch(e){ref=BASE()+"/"}
+  const html=await http(u,{referer:ref,ua:UAFF,ms:20000});
   const texts=[html];
   html.split(/<script/i).forEach(b=>{if(/eval\(function\(p,a,c,k,e,d\)/.test(b)){const un=unpack(b);if(un)texts.push(un)}});
   for(const t of texts){
@@ -468,6 +470,7 @@ async function resolveEmbed(u){
   try{
     let r=null;
     if(/wish|awish|playnix|medix|niramirus|kravaxxa|davioad|haxlopp|tryzendm|dumbalag|dhcplay|hglink/i.test(host))r=await rStreamwish(u).catch(()=>null);
+    else if(/vidhide|filelions|zilla|dropload|streamvid|vidguard|vidara|vidmoly|voe-un|lulu|mixdrop/i.test(host))r=await rStreamwish(u,true).catch(()=>null);
     else if(/streamtape/i.test(host))r=await rStreamtape(u).catch(()=>null);
     else if(/voe/i.test(host))r=await rVoe(u).catch(()=>null);
     if(r)return r;
