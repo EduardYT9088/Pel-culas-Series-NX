@@ -63,6 +63,45 @@ jobs:
           f=android/app/src/main/res/values/styles.xml
           sed -i 's#</style>#    <item name="android:statusBarColor">\#07070f</item>\n        <item name="android:navigationBarColor">\#07070f</item>\n        <item name="android:windowBackground">\#07070f</item>\n    </style>#' $f || true
 
+      - name: Bloquear redirecciones de anuncios (Google, Play Store, etc.)
+        run: |
+          d=android/app/src/main/java/com/tramoya/app
+          mkdir -p $d
+          cat > $d/MainActivity.java <<'EOF2'
+          package com.tramoya.app;
+
+          import android.os.Bundle;
+          import android.webkit.WebResourceRequest;
+          import android.webkit.WebView;
+          import com.getcapacitor.BridgeActivity;
+          import com.getcapacitor.BridgeWebViewClient;
+
+          public class MainActivity extends BridgeActivity {
+            @Override
+            public void onCreate(Bundle savedInstanceState) {
+              super.onCreate(savedInstanceState);
+              WebView wv = getBridge().getWebView();
+              wv.getSettings().setSupportMultipleWindows(false);
+              wv.setWebViewClient(new BridgeWebViewClient(getBridge()) {
+                private boolean ownUrl(String u) {
+                  return u != null && (u.startsWith("http://localhost") || u.startsWith("about:") || u.startsWith("blob:") || u.startsWith("data:"));
+                }
+                @Override
+                public boolean shouldOverrideUrlLoading(WebView view, WebResourceRequest request) {
+                  // Si un anuncio intenta sacar la app de su pantalla (Google, Play Store, otro navegador), se bloquea.
+                  if (request.isForMainFrame() && !ownUrl(request.getUrl().toString())) return true;
+                  return super.shouldOverrideUrlLoading(view, request);
+                }
+                @Override
+                public boolean shouldOverrideUrlLoading(WebView view, String url) {
+                  if (!ownUrl(url)) return true;
+                  return super.shouldOverrideUrlLoading(view, url);
+                }
+              });
+            }
+          }
+          EOF2
+
       - name: Compilar APK
         working-directory: android
         run: |
