@@ -1,4 +1,4 @@
-name: Build Peli NX APK
+name: Build Tramoya APK
 
 on:
   push:
@@ -27,28 +27,41 @@ jobs:
         run: |
           mkdir -p www
           cp index.html www/index.html
-          cat > package.json <<'EOF'
-          {"name":"peli-nx","version":"1.0.0","private":true}
-          EOF
-          npm i @capacitor/core@6 @capacitor/cli@6 @capacitor/android@6
-          cat > capacitor.config.json <<'EOF'
+          cat > package.json <<'EOF2'
+          {"name":"tramoya","version":"1.0.0","private":true}
+          EOF2
+          npm i @capacitor/core@6 @capacitor/cli@6 @capacitor/android@6 @capacitor/screen-orientation@6 hls.js@1.5.8
+          cp node_modules/hls.js/dist/hls.min.js www/hls.min.js
+          cat > capacitor.config.json <<'EOF2'
           {
-            "appId": "com.pelinx.app",
-            "appName": "Peli NX",
+            "appId": "com.tramoya.app",
+            "appName": "Tramoya",
             "webDir": "www",
-            "backgroundColor": "#000000",
+            "backgroundColor": "#07070f",
             "server": { "androidScheme": "http", "cleartext": true },
-            "android": { "allowMixedContent": true },
-            "plugins": { "CapacitorHttp": { "enabled": true } }
+            "android": { "allowMixedContent": true }
           }
-          EOF
+          EOF2
           npx cap add android
           npx cap sync android
 
-      - name: Estilo nativo (barras negras, pantalla negra al iniciar)
+      - name: Ícono de la app
+        continue-on-error: true
+        run: |
+          convert -size 512x512 gradient:'#7c5cff-#18c8e8' \( -size 512x512 xc:none -fill white -draw "polygon 196,140 196,372 380,256" \) -composite icon.png
+          res=android/app/src/main/res
+          rm -rf $res/mipmap-anydpi-v26
+          for d in mdpi:48 hdpi:72 xhdpi:96 xxhdpi:144 xxxhdpi:192; do
+            dir=$res/mipmap-${d%%:*}; sz=${d##*:}
+            for n in ic_launcher ic_launcher_round ic_launcher_foreground; do
+              convert icon.png -resize ${sz}x${sz} $dir/$n.png
+            done
+          done
+
+      - name: Estilo nativo (barras oscuras)
         run: |
           f=android/app/src/main/res/values/styles.xml
-          sed -i 's#</style>#    <item name="android:statusBarColor">\#000000</item>\n        <item name="android:navigationBarColor">\#000000</item>\n        <item name="android:windowBackground">\#000000</item>\n    </style>#' $f || true
+          sed -i 's#</style>#    <item name="android:statusBarColor">\#07070f</item>\n        <item name="android:navigationBarColor">\#07070f</item>\n        <item name="android:windowBackground">\#07070f</item>\n    </style>#' $f || true
 
       - name: Compilar APK
         working-directory: android
@@ -59,6 +72,6 @@ jobs:
       - name: Subir APK
         uses: actions/upload-artifact@v4
         with:
-          name: PeliNX-APK
+          name: Tramoya-APK
           path: android/app/build/outputs/apk/debug/app-debug.apk
           if-no-files-found: error
