@@ -371,11 +371,12 @@ async function rVoe(u){
   return data?(data.direct_access_url||data.source||null):null;
 }
 function unpack(src){
-  const m=src.match(/\}\('([\s\S]*)',\s*(\d+)\s*,\s*(\d+)\s*,\s*'([\s\S]*?)'\.split\('\|'\)/);
+  const m=src.match(/\}\s*\(\s*'((?:[^'\\]|\\.)*)'\s*,\s*(\d+)\s*,\s*(\d+)\s*,\s*'((?:[^'\\]|\\.)*)'\.split\('\|'\)/);
   if(!m)return null;
-  const a=+m[2],k=m[4].split("|");
-  const dec=w=>{let n=0;for(const ch of w){n=n*a+(/\d/.test(ch)?+ch:/[a-z]/.test(ch)?ch.charCodeAt(0)-87:ch.charCodeAt(0)-29)}return n};
-  return m[1].replace(/\\'/g,"'").replace(/\b\w+\b/g,w=>{const v=k[dec(w)];return v?v:w});
+  const p=m[1].replace(/\\'/g,"'").replace(/\\\\/g,"\\"),a=+m[2],k=m[4].split("|");
+  const val=ch=>{const c=ch.charCodeAt(0);return c>=48&&c<=57?c-48:c>=97&&c<=122?c-87:c>=65&&c<=90?c-29:-1};
+  const dec=w=>{let n=0;for(const ch of w){const v=val(ch);if(v<0||v>=a)return -1;n=n*a+v}return n};
+  return p.replace(/\b\w+\b/g,w=>{const i=dec(w);return i>=0&&k[i]?k[i]:w});
 }
 function bestQuality(master,base){
   const L=master.split("\n");let best=null,score=0;
@@ -397,13 +398,20 @@ function swMirror(u){
 async function rStreamwish(u){
   const mirror=swMirror(u);let page=mirror,html;
   try{html=await http(mirror,{ua:UAFF,referer:mirror})}catch(e){page=u;html=await http(u,{ua:UAFF,referer:u})}
-  const sm=html.match(/(eval\(function\(p,a,c,k,e,d\)[\s\S]*?)<\/script>/i);
-  if(!sm)return null;
-  const code=unpack(sm[1]);if(!code)return null;
-  const lm=code.match(/var\s+links\s*=\s*(\{[\s\S]*?\});/i);if(!lm)return null;
-  let links;try{links=JSON.parse(lm[1])}catch(e){return null}
-  const l=links.hls4||links.hls3||links.hls1||links.hls2;if(!l)return null;
-  const master=l.startsWith("/")?new URL(l,page).href:l;
+  // junta el código empaquetado de todos los <script> y también el HTML plano
+  const texts=[];
+  html.split(/<script/i).forEach(b=>{if(/eval\(function\(p,a,c,k,e,d\)/.test(b)){const un=unpack(b.slice(b.indexOf("eval(function(p,a,c,k,e,d)")));if(un)texts.push(un)}});
+  texts.push(html);
+  let l=null;
+  for(const t of texts){
+    const got={};let m;const re=/["']?(hls[1-4])["']?\s*:\s*["']([^"']+)["']/gi;
+    while((m=re.exec(t)))got[m[1].toLowerCase()]=m[2].replace(/\\\//g,"/").replace(/\\u0026/g,"&");
+    l=got.hls4||got.hls3||got.hls1||got.hls2||null;
+    if(l)break;
+  }
+  if(!l){for(const t of texts){const f=findMedia(t);if(f){l=f;break}}}
+  if(!l)return null;
+  const master=/^https?:/i.test(l)?l:new URL(l,page).href;
   try{
     const pl=await http(master,{ua:"Mozilla/5.0",referer:page});
     return bestQuality(pl,master.slice(0,master.lastIndexOf("/")+1))||master;
@@ -832,15 +840,16 @@ function embedFallback(srv){
   teardown();spin(false);
   P.el.classList.add("emb");$("#psrvb").textContent=srv.name+" · embebido";
   const f=document.createElement("iframe");f.src=srv.embedUrl;f.allow="autoplay; fullscreen; encrypted-media; picture-in-picture";f.setAttribute("allowfullscreen","");
-  // bloquea ventanas emergentes y redirecciones a páginas de anuncios
-  if(!ls.get("tr_compat",false))f.setAttribute("sandbox","allow-scripts allow-same-origin allow-forms allow-presentation");
+  // Por defecto SIN sandbox: StreamWish y otros servidores detectan el sandbox y muestran
+  // "Sandboxed embed is not allowed". Solo se activa si el usuario pide bloquear anuncios.
+  if(ls.get("tr_block",false))f.setAttribute("sandbox","allow-scripts allow-same-origin allow-forms allow-presentation");
   f.referrerPolicy="no-referrer";
   P.el.insertBefore(f,P.el.firstChild);paintCompat();showUI(true);
 }
-function paintCompat(){$("#pcompat").textContent=ls.get("tr_compat",false)?"Anuncios: permitidos":"Anuncios: bloqueados"}
+function paintCompat(){$("#pcompat").textContent=ls.get("tr_block",false)?"Anuncios: bloqueados":"Anuncios: permitidos"}
 $("#pcompat").onclick=()=>{
-  const on=!ls.get("tr_compat",false);ls.set("tr_compat",on);
-  toast(on?"Modo compatible: el reproductor puede abrir anuncios":"Anuncios bloqueados");
+  const on=!ls.get("tr_block",false);ls.set("tr_block",on);
+  toast(on?"Anuncios bloqueados (algunos servidores pueden no cargar)":"Modo compatible: el reproductor puede abrir anuncios");
   if(P.list.length)embedFallback(P.list[Math.min(P.idx,P.list.length-1)]);
 };
 function attach(url,startAt,my){
