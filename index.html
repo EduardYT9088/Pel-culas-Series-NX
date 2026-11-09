@@ -822,16 +822,21 @@ addEventListener("resize",()=>{if(P.el.classList.contains("on"))fixRot()});
 async function playFrom(i,startAt){
   const my=++P.tok;
   teardown();spin(true,"Buscando la mejor fuente…");
-  for(let k=i;k<P.list.length&&k<i+4;k++){
-    const srv=P.list[k];if(my!==P.tok)return;
-    spin(true,"Probando "+srv.name+"…");
-    let r=null;try{r=await api(`/resolve?url=${encodeURIComponent(srv.embedUrl)}`)}catch(e){}
+  // como en Animes Nexora: se buscan TODOS los servidores a la vez y se prueban en orden;
+  // el reproductor web (iframe) queda solo como último recurso
+  const jobs=[];
+  for(let k=i;k<P.list.length;k++){
+    const srv=P.list[k];
+    jobs.push({k,srv,p:api(`/resolve?url=${encodeURIComponent(srv.embedUrl)}`).then(r=>r&&r.directUrl?r.directUrl:null).catch(()=>null)});
+  }
+  for(const j of jobs){
+    spin(true,"Probando "+j.srv.name+"…");
+    const url=await j.p;
     if(my!==P.tok)return;
-    if(r&&r.directUrl){
-      const ok=await attach(r.directUrl,startAt,my);
-      if(my!==P.tok)return;
-      if(ok){P.idx=k;$("#psrvb").textContent=srv.name;spin(false);return}
-    }
+    if(!url)continue;
+    const ok=await attach(url,startAt,my);
+    if(my!==P.tok)return;
+    if(ok){P.idx=j.k;$("#psrvb").textContent=j.srv.name;spin(false);return}
   }
   if(my!==P.tok)return;
   embedFallback(P.list[Math.min(i,P.list.length-1)]);
