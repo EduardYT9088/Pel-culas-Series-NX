@@ -182,6 +182,8 @@ input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:16px;heigh
 #punlock{position:absolute;right:calc(20px + var(--sar));top:50%;transform:translateY(-50%);display:none;z-index:4;padding:10px 16px;border-radius:16px;background:rgba(255,255,255,.16);backdrop-filter:blur(8px);font-size:13px;align-items:center;gap:7px}
 #punlock.on{display:flex}
 #pskip{position:absolute;top:50%;transform:translateY(-50%);font-size:15px;font-weight:600;padding:10px 16px;border-radius:30px;background:rgba(0,0,0,.55);display:none;z-index:4}
+#pcompat{display:none}
+#player.emb #pcompat{display:flex}
 #player.emb .pmid,#player.emb .prow,#player.emb #plock,#player.emb #pspeed,#player.emb #pfit{display:none}
 #player.emb #pui{pointer-events:none;background:none}
 #player.emb .pbot{left:auto;padding-bottom:calc(10px + var(--sab))}
@@ -245,6 +247,7 @@ input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:16px;heigh
       <div class="pchips">
         <button id="pspeed">1x</button>
         <button id="pfit"><svg viewBox="0 0 24 24"><path d="M8 3H5a2 2 0 0 0-2 2v3M16 3h3a2 2 0 0 1 2 2v3M8 21H5a2 2 0 0 1-2-2v-3M16 21h3a2 2 0 0 0 2-2v-3"/></svg>Ajustar</button>
+        <button id="pcompat"></button>
         <button id="psrv"><svg viewBox="0 0 24 24"><path d="M4 6h16M4 12h16M4 18h10"/></svg>Fuentes</button>
         <button class="nx" id="pnext" hidden></button>
       </div>
@@ -416,15 +419,49 @@ async function rStreamtape(u){
   if(!last)return null;
   return last.startsWith("//")?"https:"+last:last.startsWith("/")?"https://streamtape.com"+last:last;
 }
+// ---- extractor genérico: busca el video dentro de cualquier página de embed ----
+const BAD_URL=/cloudflareinsights|google-analytics|googletagmanager|facebook\.net|beacon|analytics|pixel|bigbuckbunny|test-videos|sample-video|placeholder|\.js(\?|$)/i;
+function cleanUrl(u){return u.replace(/\\u0026/g,"&").replace(/\\\//g,"/").replace(/&amp;/g,"&").trim()}
+function findMedia(text){
+  const out=[];
+  const re1=/(?:file|src|source|hls\d?|url|stream)["']?\s*[:=]\s*["'](https?:(?:\\?\/){2}[^"']+?\.(?:m3u8|mp4)[^"']*)["']/gi;
+  let m;while((m=re1.exec(text)))out.push(cleanUrl(m[1]));
+  const re2=/https?:(?:\\?\/){2}[^\s"'<>\\]+?\.(?:m3u8|mp4)[^\s"'<>\\]*/gi;
+  while((m=re2.exec(text)))out.push(cleanUrl(m[0]));
+  const good=out.filter(u=>!BAD_URL.test(u));
+  return good.find(u=>/\.m3u8/i.test(u))||good[0]||null;
+}
+async function rGeneric(u,depth=0){
+  const html=await http(u,{referer:BASE()+"/",ua:UAFF,ms:9000});
+  const texts=[html];
+  html.split(/<script/i).forEach(b=>{if(/eval\(function\(p,a,c,k,e,d\)/.test(b)){const un=unpack(b);if(un)texts.push(un)}});
+  for(const t of texts){
+    const url=findMedia(t);
+    if(url){
+      if(/\.m3u8/i.test(url)){
+        try{const pl=await http(url,{ua:UAFF,referer:u,ms:8000});return bestQuality(pl,url.slice(0,url.lastIndexOf("/")+1))||url}catch(e){return url}
+      }
+      return url;
+    }
+  }
+  if(depth<2){
+    const fm=html.match(/<iframe[^>]+src=["']([^"']+)["']/i);
+    if(fm){try{return await rGeneric(new URL(fm[1],u).href,depth+1)}catch(e){}}
+  }
+  return null;
+}
 async function resolveEmbed(u){
   let host="",path="";
   try{const x=new URL(u);host=x.hostname.replace(/^www\./,"").toLowerCase();path=x.pathname.toLowerCase()}catch(e){return null}
   try{
-    if(/wish|awish|playnix|medix|niramirus|kravaxxa|davioad|haxlopp|tryzendm|dumbalag|dhcplay|hglink/i.test(host))return await rStreamwish(u);
-    if(/streamtape/i.test(host))return await rStreamtape(u);
-    if(/voe/i.test(host)||/\/e\//.test(path))return await rVoe(u);
+    let r=null;
+    if(/wish|awish|playnix|medix|niramirus|kravaxxa|davioad|haxlopp|tryzendm|dumbalag|dhcplay|hglink/i.test(host))r=await rStreamwish(u).catch(()=>null);
+    else if(/streamtape/i.test(host))r=await rStreamtape(u).catch(()=>null);
+    else if(/voe/i.test(host))r=await rVoe(u).catch(()=>null);
+    if(r)return r;
+    return await rGeneric(u); // respaldo para cualquier servidor
   }catch(e){}
-  return null; // sin resolvedor: se usa el reproductor embebido
+  return null; // último recurso: reproductor embebido
 }
 // ---- endpoints ----
 const E={
@@ -795,8 +832,17 @@ function embedFallback(srv){
   teardown();spin(false);
   P.el.classList.add("emb");$("#psrvb").textContent=srv.name+" · embebido";
   const f=document.createElement("iframe");f.src=srv.embedUrl;f.allow="autoplay; fullscreen; encrypted-media; picture-in-picture";f.setAttribute("allowfullscreen","");
-  P.el.insertBefore(f,P.el.firstChild);showUI(true);
+  // bloquea ventanas emergentes y redirecciones a páginas de anuncios
+  if(!ls.get("tr_compat",false))f.setAttribute("sandbox","allow-scripts allow-same-origin allow-forms allow-presentation");
+  f.referrerPolicy="no-referrer";
+  P.el.insertBefore(f,P.el.firstChild);paintCompat();showUI(true);
 }
+function paintCompat(){$("#pcompat").textContent=ls.get("tr_compat",false)?"Anuncios: permitidos":"Anuncios: bloqueados"}
+$("#pcompat").onclick=()=>{
+  const on=!ls.get("tr_compat",false);ls.set("tr_compat",on);
+  toast(on?"Modo compatible: el reproductor puede abrir anuncios":"Anuncios bloqueados");
+  if(P.list.length)embedFallback(P.list[Math.min(P.idx,P.list.length-1)]);
+};
 function attach(url,startAt,my){
   return new Promise(res=>{
     const v=document.createElement("video");v.playsInline=true;v.setAttribute("playsinline","");v.preload="auto";
