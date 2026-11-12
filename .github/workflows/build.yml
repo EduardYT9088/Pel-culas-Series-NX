@@ -78,6 +78,7 @@ jobs:
           package com.tramoya.app;
 
           import android.os.Bundle;
+          import android.webkit.CookieManager;
           import android.webkit.WebResourceRequest;
           import android.webkit.WebView;
           import com.getcapacitor.BridgeActivity;
@@ -89,6 +90,9 @@ jobs:
               super.onCreate(savedInstanceState);
               WebView wv = getBridge().getWebView();
               wv.getSettings().setSupportMultipleWindows(false);
+              // el reproductor web (Voe, etc.) necesita guardar su cookie de "no soy un robot"
+              CookieManager.getInstance().setAcceptCookie(true);
+              CookieManager.getInstance().setAcceptThirdPartyCookies(wv, true);
               wv.setWebViewClient(new BridgeWebViewClient(getBridge()) {
                 private boolean ownUrl(String u) {
                   return u != null && (u.startsWith("http://localhost") || u.startsWith("about:") || u.startsWith("blob:") || u.startsWith("data:"));

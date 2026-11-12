@@ -962,6 +962,11 @@ async function playFrom(i,startAt,skip){
     delete P.cache[j.srv.embedUrl];
   }
   if(my!==P.tok)return;
+  // como Animes Nexora: si un servidor pide verificación (Voe), se abre solo su reproductor web
+  const vb=bestEmbed(i),vh=(()=>{try{return new URL(vb.embedUrl).hostname.replace(/^www\./,"")}catch(e){return""}})();
+  if(vb&&DG.some(x=>(x.startsWith(vh+":")||x.startsWith(vb.name+":"))&&/verificación/.test(x))){
+    embedFallback(vb);toast("Toca «No soy un robot» y luego el botón de play");return;
+  }
   playError(i);
 }
 function playError(i){
