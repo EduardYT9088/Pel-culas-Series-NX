@@ -410,8 +410,8 @@ async function rVoe1(u){
     const data=voeDecode(enc,lut)||voeDecode(enc);
     if(data){
       const hls=window.Hls&&Hls.isSupported();
-      const l=(hls&&data.source)||data.direct_access_url||data.file||data.source;
-      if(l)return l;
+      const ls=[...new Set([hls&&data.source,data.direct_access_url,data.file,data.source].filter(x=>typeof x==="string"&&/^https?:/i.test(x)))];
+      if(ls.length){ALTS.set(ls[0],ls.slice(1));return ls[0]}
     }
   }
   const m2=html.match(/['"]hls['"]\s*:\s*['"]([^'"]+)['"]/)||html.match(/['"]mp4['"]\s*:\s*['"]([^'"]+)['"]/);
@@ -479,6 +479,7 @@ const VH_LIVE=["callistanise.com","minochinos.com","morencius.com","smoothpre.co
 function vhMirrors(u){
   try{const x=new URL(u);return VH_LIVE.filter(h=>h!==x.hostname).map(h=>"https://"+h+x.pathname+x.search)}catch(e){return[]}
 }
+const ALTS=new Map(); // otros enlaces del MISMO video (Voe da uno directo y otro por partes)
 const DG=[];const dg=t=>{try{DG.push(t);if(DG.length>40)DG.shift()}catch(e){}};
 if(!Promise.any)Promise.any=ps=>new Promise((res,rej)=>{const a=[...ps];let n=0;if(!a.length)return rej(new Error("vacío"));a.forEach(p=>Promise.resolve(p).then(res,()=>{if(++n===a.length)rej(new Error("todos fallaron"))}))});
 // prueba todas las direcciones a la vez y se queda con la primera que dé video
@@ -928,16 +929,20 @@ async function enterLandscape(){
 }
 function fixRot(){const r=P.el.classList.contains("on")&&innerHeight>innerWidth;P.el.classList.toggle("rot",r);document.body.classList.toggle("rotmode",r)}
 addEventListener("resize",()=>{if(P.el.classList.contains("on"))fixRot()});
-async function playFrom(i,startAt){
+async function playFrom(i,startAt,skip){
   const my=++P.tok;
   teardown();spin(true,"Buscando la mejor fuente…");
+  P.skip=skip||new Set();P.cache=P.cache||{};
   // como en Animes Nexora: se buscan TODOS los servidores a la vez y se prueban en orden;
   // el reproductor web (iframe) queda solo como último recurso
   const jobs=[];
-  for(let k=i;k<P.list.length;k++){
+  for(let k=skip?0:i;k<P.list.length;k++){
     const srv=P.list[k];
+    if(P.skip.has(srv.embedUrl))continue;
     let fin=false;
-    const job=api(`/resolve?url=${encodeURIComponent(srv.embedUrl)}`).then(r=>r&&r.directUrl?r.directUrl:null).catch(()=>null).finally(()=>{fin=true});
+    // si ya se sacó el enlace hace poco, se reutiliza: pedirlo otra vez hace que Voe pida verificación
+    const c=P.cache[srv.embedUrl];
+    const job=(c&&Date.now()-c.t<20*60000?Promise.resolve(c.url):api(`/resolve?url=${encodeURIComponent(srv.embedUrl)}`).then(r=>r&&r.directUrl?r.directUrl:null).catch(()=>null)).then(u=>{if(u)P.cache[srv.embedUrl]={url:u,t:Date.now()};return u}).finally(()=>{fin=true});
     jobs.push({k,srv,p:Promise.race([job,new Promise(r=>setTimeout(()=>{if(!fin&&my===P.tok)dg(srv.name+": tardó demasiado");r(null)},30000))])});
   }
   // como Animes Nexora: se reproduce el PRIMER servidor que entregue video, sin esperar a los lentos
@@ -950,9 +955,11 @@ async function playFrom(i,startAt){
     if(my!==P.tok)return;
     if(!url)continue;
     spin(true,"Cargando desde "+j.srv.name+"…");
-    const ok=await attach(url,startAt,my);
+    let ok=await attach(url,startAt,my,j.srv);
+    for(const alt of (ALTS.get(url)||[])){if(ok||my!==P.tok)break;spin(true,"Probando otro enlace de "+j.srv.name+"…");ok=await attach(alt,startAt,my,j.srv)}
     if(my!==P.tok)return;
     if(ok){P.idx=j.k;$("#psrvb").textContent=j.srv.name;spin(false);return}
+    delete P.cache[j.srv.embedUrl];
   }
   if(my!==P.tok)return;
   playError(i);
@@ -966,7 +973,12 @@ function playError(i){
   d.innerHTML='<b style="font-size:16px">No se pudo sacar el video directo</b><div style="opacity:.7;max-width:420px;text-align:left">'+(why||"Ningún servidor respondió.")+'</div><div style="display:flex;gap:10px"><button id="perr1" style="padding:10px 16px;border-radius:12px;border:0;background:linear-gradient(90deg,#7c5cff,#18c8e8);color:#fff;font-weight:700">Reintentar</button><button id="perr2" style="padding:10px 16px;border-radius:12px;border:1px solid #ffffff44;background:none;color:#fff">Reproductor web</button></div>';
   P.el.appendChild(d);showUI(true);
   $("#perr1").onclick=()=>{d.remove();DG.length=0;playFrom(i,0)};
-  $("#perr2").onclick=()=>{d.remove();embedFallback(P.list[Math.min(i,P.list.length-1)])};
+  $("#perr2").onclick=()=>{d.remove();embedFallback(bestEmbed(i))};
+}
+function bestEmbed(i){
+  const hostOf=s=>{try{return new URL(s.embedUrl).hostname.replace(/^www\./,"")}catch(e){return""}};
+  const why=s=>DG.filter(x=>x.startsWith(hostOf(s)+":")||x.startsWith(s.name+":")).join(" ");
+  return P.list.find(s=>/verificación/.test(why(s)))||P.list.find(s=>!/HTTP 404|HTTP 410/.test(why(s)))||P.list[Math.min(i,P.list.length-1)];
 }
 function embedFallback(srv){
   teardown();spin(false);
@@ -978,23 +990,40 @@ function embedFallback(srv){
   P.el.insertBefore(f,P.el.firstChild);showUI(true);
 }
 try{localStorage.removeItem("tr_block");localStorage.removeItem("tr_compat")}catch(e){}
-function attach(url,startAt,my){
+function attach(url,startAt,my,srv){
   return new Promise(res=>{
     const v=document.createElement("video");v.playsInline=true;v.setAttribute("playsinline","");v.preload="auto";
     P.el.insertBefore(v,P.el.firstChild);P.v=v;
     let done=false,t;
     const fin=ok=>{if(done)return;done=true;clearTimeout(t);if(!ok){if(P.hls){try{P.hls.destroy()}catch(e){}P.hls=null}v.remove();if(P.v===v)P.v=null}res(ok)};
-    const runtimeErr=()=>{if(my!==P.tok||!done)return;const at=v.currentTime||0;if(P.idx+1<P.list.length)playFrom(P.idx+1,at);else embedFallback(P.list[P.idx])};
+    // si se corta a mitad: 1) reintenta el mismo enlace donde iba, 2) otro enlace del mismo video, 3) los demás servidores
+    let tries=0;
+    const runtimeErr=()=>{
+      if(my!==P.tok||!done)return;const at=v.currentTime||startAt||0;
+      if(tries<2){tries++;spin(true,"Reconectando…");
+        if(P.hls){try{P.hls.stopLoad();P.hls.startLoad(at)}catch(e){}return}
+        const src0=v.currentSrc||v.src;try{v.src=src0;v.load();v.addEventListener("loadeddata",()=>{try{v.currentTime=at}catch(e){}v.play().catch(()=>{})},{once:true})}catch(e){}return}
+      const sk=new Set(P.skip||[]);if(srv)sk.add(srv.embedUrl);
+      const alts=ALTS.get(url0)||[];
+      if(alts.length){const n=alts.shift();toast("Probando otro enlace del mismo servidor…");teardown();attach(n,at,my,srv).then(ok=>{if(!ok&&my===P.tok)playFrom(0,at,sk)});return}
+      if(P.list.some(s=>!sk.has(s.embedUrl))){toast("Se cortó el video, buscando otro servidor…");playFrom(0,at,sk)}
+      else{dg((srv&&srv.name||"Servidor")+": se cortó la reproducción");playError(0)}
+    };
+    v.addEventListener("playing",()=>{tries=0});
     t=setTimeout(()=>fin(false),20000);
     v.addEventListener("loadeddata",()=>{if(startAt>0)try{v.currentTime=startAt}catch(e){}v.play().catch(()=>{});fin(true)},{once:true});
     v.addEventListener("error",()=>done?runtimeErr():fin(false));
     bindVideo(v);
-    let ref=null;const mr=url.match(/#nxref=([^#]+)$/);if(mr){ref=decodeURIComponent(mr[1]);url=url.slice(0,mr.index)}
+    const url0=url;let ref=null;const mr=url.match(/#nxref=([^#]+)$/);if(mr){ref=decodeURIComponent(mr[1]);url=url.slice(0,mr.index)}
     if(((ref&&!/\.mp4(\?|$)/i.test(url))||/\.m3u8/i.test(url))&&window.Hls&&Hls.isSupported()){
       const cfg={maxBufferLength:40,enableWorker:true};
       if(ref&&CAPH){const L=refLoader(ref);cfg.loader=L}
       const h=new Hls(cfg);P.hls=h;h.loadSource(url);h.attachMedia(v);
-      h.on(Hls.Events.ERROR,(_,d)=>{if(d.fatal)done?runtimeErr():fin(false)});
+      let mrec=0;
+      h.on(Hls.Events.ERROR,(_,d)=>{
+        if(!d.fatal)return;
+        if(done&&d.type===Hls.ErrorTypes.MEDIA_ERROR&&mrec<2){mrec++;try{h.recoverMediaError()}catch(e){}return}
+        done?runtimeErr():fin(false)});
     }else v.src=url;
   });
 }
