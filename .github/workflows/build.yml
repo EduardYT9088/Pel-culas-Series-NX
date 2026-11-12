@@ -115,7 +115,13 @@ jobs:
               "var z=parseInt(cs.zIndex,10)||0;var t=(el.innerText||'').slice(0,500);" +
               "if(RX.test(t)||z>=2147483000){el.remove();}}}" +
               "new MutationObserver(function(){clearTimeout(window.__nxT);window.__nxT=setTimeout(sweep,120)}).observe(document,{childList:true,subtree:true});" +
-              "setInterval(sweep,1500);}catch(e){}})();";
+              "setInterval(sweep,1500);" +
+          "var sentA=0,sentO=0;function post(m){try{window.top.postMessage({nx:m},'*')}catch(e){}}" +
+          "function watch(){var w=document.querySelector('altcha-widget');if(w&&!sentA){sentA=1;post('altcha');" +
+          "w.addEventListener('statechange',function(ev){if(ev.detail&&ev.detail.state==='verified'&&!sentO){sentO=1;post('ok')}})}}" +
+          "new MutationObserver(watch).observe(document,{childList:true,subtree:true});watch();" +
+          "document.addEventListener('playing',function(){post('playing')},true);" +
+          "}catch(e){}})();";
 
             private static boolean isAd(String host) {
               if (host == null) return false;

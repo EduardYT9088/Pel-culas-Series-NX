@@ -199,6 +199,13 @@ input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:16px;heigh
 #player.emb #pui{pointer-events:none;background:none}
 #player.emb .pbot{left:auto;padding-bottom:calc(10px + var(--sab))}
 #player.emb #pui.show,#player.emb #pui{opacity:1}
+#player.verif #pui,#player.verif #pspin,#player.verif #pskip{display:none!important}
+#vbar{display:none;position:absolute;left:0;right:0;top:0;z-index:7;align-items:center;gap:14px;padding:calc(12px + var(--sat,0px)) 18px 14px;background:linear-gradient(#000e,#000a 70%,#0000);color:#fff}
+#player.verif #vbar{display:flex}
+#vbar .vi{width:40px;height:40px;border-radius:12px;display:grid;place-items:center;background:linear-gradient(135deg,#7c5cff,#18c8e8);flex:none}
+#vbar .vi svg{width:22px;height:22px;stroke:#fff;fill:none;stroke-width:2.2;stroke-linecap:round;stroke-linejoin:round}
+#vbar .vt{flex:1;min-width:0}#vbar b{display:block;font-size:15px}#vbar small{opacity:.75;font-size:12.5px}
+#vbar button{border:1px solid #ffffff40;background:#ffffff14;color:#fff;border-radius:12px;padding:9px 14px;font:inherit;font-size:13px}
 .toast{position:fixed;left:50%;bottom:calc(100px + var(--sab));transform:translate(-50%,20px);background:#fff;color:#111;padding:11px 18px;border-radius:14px;font-size:13.5px;font-weight:600;opacity:0;transition:.25s;z-index:120;pointer-events:none;max-width:88vw;text-align:center}
 .toast.on{opacity:1;transform:translate(-50%,0)}
 /* ajustes */
@@ -264,6 +271,7 @@ input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:16px;heigh
     </div>
   </div>
   <div id="pspin"><i></i><span id="pstat"></span></div>
+  <div id="vbar"><div class="vi"><svg viewBox="0 0 24 24"><path d="M12 3l8 3v6c0 4.5-3.4 8.3-8 9-4.6-.7-8-4.5-8-9V6z"/><path d="M8.5 12l2.5 2.5 4.5-5"/></svg></div><div class="vt"><b>Verificación rápida</b><small>Marca la casilla «I'm not a robot» y el video empieza solo</small></div><button id="vsrc">Otra fuente</button><button id="vcancel">Cancelar</button></div>
   <div id="pskip"></div>
   <button id="punlock"><svg viewBox="0 0 24 24"><rect x="4" y="11" width="16" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 7.5-2"/></svg>Desbloquear</button>
 </div>
@@ -897,7 +905,7 @@ function hideUI(){clearTimeout(P.hideT);$("#pui").classList.remove("show")}
 function teardown(){
   if(P.hls){try{P.hls.destroy()}catch(e){}P.hls=null}
   $$("video,iframe",P.el).forEach(n=>{try{n.pause&&n.pause();n.removeAttribute("src");n.load&&n.load()}catch(e){}n.remove()});
-  P.v=null;P.el.classList.remove("emb");{const e=$("#perr");if(e)e.remove()}
+  P.v=null;P.el.classList.remove("emb","verif");{const e=$("#perr");if(e)e.remove()}
 }
 function nextEp(){
   const ctx=P.ctx;if(!ctx||!ctx.s)return null;
@@ -985,8 +993,14 @@ function bestEmbed(i){
   const why=s=>DG.filter(x=>x.startsWith(hostOf(s)+":")||x.startsWith(s.name+":")).join(" ");
   return P.list.find(s=>/verificación/.test(why(s)))||P.list.find(s=>!/HTTP 404|HTTP 410/.test(why(s)))||P.list[Math.min(i,P.list.length-1)];
 }
+function verifOn(){if(!P.el.classList.contains("emb"))return;P.el.classList.add("verif");spin(false)}
+function verifOff(){if(!P.el.classList.contains("verif"))return;P.el.classList.remove("verif");showUI(true)}
+// la página del reproductor web (dentro de la app) avisa cuando muestra su verificación y cuando ya reproduce
+addEventListener("message",e=>{const m=e.data&&e.data.nx;if(!m||!P.el.classList.contains("emb"))return;if(m==="altcha")verifOn();else if(m==="ok"||m==="playing")verifOff()});
+$("#vcancel").onclick=()=>{verifOff();history.back()};
+$("#vsrc").onclick=()=>{verifOff();$("#psrv").click()};
 function embedFallback(srv){
-  teardown();spin(false);
+  P.tok++;teardown();spin(false);
   P.el.classList.add("emb");$("#psrvb").textContent=srv.name+" · embebido";
   const f=document.createElement("iframe");f.src=srv.embedUrl;f.allow="autoplay; fullscreen; encrypted-media; picture-in-picture";f.setAttribute("allowfullscreen","");
   // NUNCA sandbox (como en Animes Nexora): StreamWish, Voe y otros lo detectan y muestran
