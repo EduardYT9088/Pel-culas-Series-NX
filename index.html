@@ -195,8 +195,6 @@ input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:16px;heigh
 #punlock{position:absolute;right:calc(20px + var(--sar));top:50%;transform:translateY(-50%);display:none;z-index:4;padding:10px 16px;border-radius:16px;background:rgba(255,255,255,.16);backdrop-filter:blur(8px);font-size:13px;align-items:center;gap:7px}
 #punlock.on{display:flex}
 #pskip{position:absolute;top:50%;transform:translateY(-50%);font-size:15px;font-weight:600;padding:10px 16px;border-radius:30px;background:rgba(0,0,0,.55);display:none;z-index:4}
-#pcompat{display:none}
-#player.emb #pcompat{display:flex}
 #player.emb .pmid,#player.emb .prow,#player.emb #plock,#player.emb #pspeed,#player.emb #pfit{display:none}
 #player.emb #pui{pointer-events:none;background:none}
 #player.emb .pbot{left:auto;padding-bottom:calc(10px + var(--sab))}
@@ -260,7 +258,6 @@ input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:16px;heigh
       <div class="pchips">
         <button id="pspeed">1x</button>
         <button id="pfit"><svg viewBox="0 0 24 24"><path d="M8 3H5a2 2 0 0 0-2 2v3M16 3h3a2 2 0 0 1 2 2v3M8 21H5a2 2 0 0 1-2-2v-3M16 21h3a2 2 0 0 0 2-2v-3"/></svg>Ajustar</button>
-        <button id="pcompat"></button>
         <button id="psrv"><svg viewBox="0 0 24 24"><path d="M4 6h16M4 12h16M4 18h10"/></svg>Fuentes</button>
         <button class="nx" id="pnext" hidden></button>
       </div>
@@ -364,26 +361,52 @@ function parseServers(d){
 // ---- resolvedores ----
 const rot13=s=>s.replace(/[A-Za-z]/g,c=>String.fromCharCode(c.charCodeAt(0)+(c.toLowerCase()<"n"?13:-13)));
 function b64(s){s=s.replace(/[^A-Za-z0-9+/]/g,"");while(s.length%4)s+="=";return atob(s)}
-function voeDecode(raw){
+const VOE_LUT=["@$","^^","~@","%?","*~","!!","#&"];
+function voeDecode(raw,lut){
   try{
     let s=rot13(raw);
-    ["@$","^^","~@","%?","*~","!!","#&"].forEach(p=>{s=s.split(p).join("_")});
-    s=s.split("_").join("");
+    (lut&&lut.length?lut:VOE_LUT).forEach(p=>{s=s.split(p).join("")});
     s=b64(s);
     s=s.split("").map(c=>String.fromCharCode(c.charCodeAt(0)-3)).join("");
     s=s.split("").reverse().join("");
     return JSON.parse(b64(s));
   }catch(e){return null}
 }
+// Voe ahora cambia los símbolos del cifrado en su script: se leen de ahí y, si no, se usan los de siempre
 async function rVoe(u){
-  let html=await http(u,{ua:UAFF,ms:9000});
-  const m=html.match(/window\.location\.href\s*=\s*['"]([^'"]+)['"]/);
-  if(m)html=await http(m[1],{ua:UAFF,ms:9000});
-  const d=dom(html);
-  const sc=[...d.querySelectorAll('script[type="application/json"]')].find(s=>{try{const p=JSON.parse(s.textContent);return Array.isArray(p)&&typeof p[0]==="string"}catch(e){return false}});
-  if(!sc)return null;
-  const data=voeDecode(JSON.parse(sc.textContent)[0]);
-  return data?(data.direct_access_url||data.source||null):null;
+  let page=u,html=await http(u,{ua:UAFF,ms:9000});
+  for(let i=0;i<3;i++){
+    const m=html.match(/window\.location\.href\s*=\s*['"]([^'"]+)['"]/);
+    if(!m||html.length>60000)break;
+    page=new URL(m[1],page).href;html=await http(page,{ua:UAFF,referer:u,ms:9000});
+  }
+  if(/altcha-widget/i.test(html))throw new Error("pide verificación, usa el reproductor web");
+  let enc=null,lut=null;
+  const r=html.match(/json">\s*\[\s*"([^"]+)"\s*\]\s*<\/script>\s*<script[^>]*src=["']([^"']+)/i);
+  if(r){
+    enc=r[1];
+    try{
+      const js=await http(new URL(r[2],page).href,{ua:UAFF,referer:page,ms:7000});
+      const a=js.match(/\[(?:'[^'\w\s]{2}'[,\]]){1,12}/);
+      if(a)lut=[...a[0].matchAll(/'([^']{2})'/g)].map(x=>x[1]);
+    }catch(e){}
+  }
+  if(!enc){
+    const sc=[...dom(html).querySelectorAll('script[type="application/json"]')].find(s=>{try{const p=JSON.parse(s.textContent);return Array.isArray(p)&&typeof p[0]==="string"}catch(e){return false}});
+    if(sc)enc=JSON.parse(sc.textContent)[0];
+  }
+  if(enc){
+    const data=voeDecode(enc,lut)||voeDecode(enc);
+    if(data){
+      const hls=window.Hls&&Hls.isSupported();
+      const l=(hls&&data.source)||data.direct_access_url||data.file||data.source;
+      if(l)return l;
+    }
+  }
+  const m2=html.match(/['"]hls['"]\s*:\s*['"]([^'"]+)['"]/)||html.match(/['"]mp4['"]\s*:\s*['"]([^'"]+)['"]/);
+  if(m2){let l=m2[1];if(!/^https?:/i.test(l)){try{l=atob(l)}catch(e){}}if(/^https?:/i.test(l))return l}
+  const f=findMedia(html);if(f)return f;
+  throw new Error(enc?"no se pudo descifrar el enlace":"sin enlace de video");
 }
 function unpack(src){
   const m=src.match(/\}\s*\(\s*'((?:[^'\\]|\\.)*)'\s*,\s*(\d+)\s*,\s*(\d+)\s*,\s*'((?:[^'\\]|\\.)*)'\.split\('\|'\)/);
@@ -402,21 +425,36 @@ function bestQuality(master,base){
   }
   return best;
 }
-function swMirror(u){
+// espejos actuales de StreamWish (los dominios viejos dejan de responder)
+const SW_DMCA=["hgplaycdn.com","hglamioz.com","niramirus.com","playnixes.com","medixiru.com"],SW_MAIN=["hanerix.com","audinifer.com","vibuxer.com"],SW_RULES=["dhcplay.com","hglink.to","hgcloud.to","test.hglink.to","wish-redirect.aiavh.com"];
+function swMirrors(u){
   try{
-    const x=new URL(u);
-    const dmca=["playnixes.com","niramirus.com","medixiru.com","hgplaycdn.com","hglamioz.com"],main=["kravaxxa.com","davioad.com","haxloppd.com","tryzendm.com","dumbalag.com"],rules=["dhcplay.com","hglink.to","test.hglink.to","wish-redirect.aiavh.com"];
-    const pool=rules.includes(x.hostname)?main:dmca;
-    return"https://"+pool[Math.floor(Math.random()*pool.length)]+x.pathname+x.search;
-  }catch(e){return u}
+    const x=new URL(u),id=x.pathname.replace(/^\/(?:e|f|d|v|embed)\//i,"/").replace(/^\/+/,"");
+    const pool=SW_RULES.includes(x.hostname)?SW_MAIN:SW_DMCA;
+    return [...pool].sort(()=>Math.random()-.5).slice(0,3).map(h=>"https://"+h+"/e/"+id);
+  }catch(e){return[]}
+}
+// VidHide: vidhidepro / vidhidefast y otros ya no conectan; el mismo video está en estos dominios
+const VH_LIVE=["callistanise.com","minochinos.com","morencius.com","smoothpre.com","dhtpre.com"];
+function vhMirrors(u){
+  try{const x=new URL(u);return VH_LIVE.filter(h=>h!==x.hostname).map(h=>"https://"+h+x.pathname+x.search)}catch(e){return[]}
 }
 const DG=[];const dg=t=>{try{DG.push(t);if(DG.length>40)DG.shift()}catch(e){}};
+if(!Promise.any)Promise.any=ps=>new Promise((res,rej)=>{const a=[...ps];let n=0;if(!a.length)return rej(new Error("vacío"));a.forEach(p=>Promise.resolve(p).then(res,()=>{if(++n===a.length)rej(new Error("todos fallaron"))}))});
+// prueba todas las direcciones a la vez y se queda con la primera que dé video
 async function rStreamwish(u,direct){
-  const tries=direct?[u]:[swMirror(u),swMirror(u),u];
+  const tries=[...new Set(direct?[u,...vhMirrors(u)]:[...swMirrors(u),u])];
   const lbl=(()=>{try{return new URL(u).hostname.replace(/^www\./,"")}catch(e){return "servidor"}})();
-  for(const page of tries){
-    let html;
-    try{html=await http(page,{ua:UAFF,referer:page,ms:9000})}catch(e){dg(lbl+": "+((e&&e.message)||"sin conexión"));continue}
+  const errs=[];
+  try{return await Promise.any(tries.map(p=>swPage(p).then(r=>r||Promise.reject(0),e=>{errs.push(e&&e.message||"sin conexión");return Promise.reject(e)})))}
+  catch(e){
+    const why=errs.find(x=>/verificación|enlace/.test(x))||(errs.length?"ningún espejo conectó":"sin enlace de video");
+    dg(lbl+": "+why);return null;
+  }
+}
+async function swPage(page){
+  {
+    let html=await http(page,{ua:UAFF,referer:page,ms:9000});
     const texts=[];
     html.split(/<script/i).forEach(b=>{if(/eval\(function\(p,a,c,k,e,d\)/.test(b)){const un=unpack(b.slice(b.indexOf("eval(function(p,a,c,k,e,d)")));if(un)texts.push(un)}});
     texts.push(html);
@@ -428,10 +466,10 @@ async function rStreamwish(u,direct){
       if(l)break;
     }
     if(!l){for(const t of texts){const f=findMedia(t);if(f){l=f;break}}}
-    if(!l){dg(lbl+": la página no trae enlace de video"+(/captcha|cloudflare|just a moment/i.test(html)?" (verificación)":""));continue}
+    if(!l)throw new Error(/captcha|cloudflare|just a moment/i.test(html)?"pide verificación":"sin enlace de video");
     const master=/^https?:/i.test(l)?l:new URL(l,page).href;
     try{
-      const pl=await http(master,{ua:"Mozilla/5.0",referer:page});
+      const pl=await http(master,{ua:"Mozilla/5.0",referer:page,ms:5000});
       return bestQuality(pl,master.slice(0,master.lastIndexOf("/")+1))||master;
     }catch(e){return master}
   }
@@ -484,10 +522,12 @@ async function resolveEmbed(u){
   try{const x=new URL(u);host=x.hostname.replace(/^www\./,"").toLowerCase();path=x.pathname.toLowerCase()}catch(e){return null}
   try{
     let r=null;
-    if(/wish|awish|playnix|medix|niramirus|kravaxxa|davioad|haxlopp|tryzendm|dumbalag|dhcplay|hglink/i.test(host))r=await rStreamwish(u).catch(()=>null);
-    else if(/vidhide|filelions|zilla|dropload|streamvid|vidguard|vidara|vidmoly|voe-un|lulu|mixdrop/i.test(host))r=await rStreamwish(u,true).catch(()=>null);
-    else if(/streamtape/i.test(host))r=await rStreamtape(u).catch(()=>null);
-    else if(/voe/i.test(host))r=await rVoe(u).catch(()=>null);
+    const lb=host||"servidor",fail=e=>{dg(lb+": "+((e&&e.message)||"error"));return null};
+    if(/voe/i.test(host)){r=await rVoe(u).catch(fail);if(!r)return null} // Voe: si su extractor falla, el genérico tampoco sirve
+    else if(/wish|awish|playnix|medix|niramirus|kravaxxa|davioad|haxlopp|tryzendm|dumbalag|dhcplay|hglink|hgcloud|hgplay|hglamioz|hanerix|audinifer|vibuxer/i.test(host))r=await rStreamwish(u).catch(fail);
+    else if(/vidhide|filelions|[mad]lions|callistanise|minochinos|morencius|smoothpre|dhtpre|peytonepre|movearnpre|mivalyo|dinisglows|dingtezuni|ryderjet/i.test(host)){r=await rStreamwish(u,true).catch(fail);if(!r)return null}
+    else if(/zilla|dropload|streamvid|vidguard|vidara|vidmoly|lulu|mixdrop/i.test(host))r=await rStreamwish(u,true).catch(fail);
+    else if(/streamtape/i.test(host))r=await rStreamtape(u).catch(fail);
     if(r)return r;
     const g=await rGeneric(u);if(!g)dg((host||"servidor")+": sin enlace de video");return g; // respaldo para cualquier servidor
   }catch(e){dg((host||"servidor")+": "+((e&&e.message)||"error"))}
@@ -855,7 +895,9 @@ async function playFrom(i,startAt){
   const jobs=[];
   for(let k=i;k<P.list.length;k++){
     const srv=P.list[k];
-    jobs.push({k,srv,p:Promise.race([api(`/resolve?url=${encodeURIComponent(srv.embedUrl)}`).then(r=>r&&r.directUrl?r.directUrl:null).catch(()=>null),new Promise(r=>setTimeout(()=>r(null),10000))])});
+    let fin=false;
+    const job=api(`/resolve?url=${encodeURIComponent(srv.embedUrl)}`).then(r=>r&&r.directUrl?r.directUrl:null).catch(()=>null).finally(()=>{fin=true});
+    jobs.push({k,srv,p:Promise.race([job,new Promise(r=>setTimeout(()=>{if(!fin&&my===P.tok)dg(srv.name+": tardó demasiado");r(null)},15000))])});
   }
   for(const j of jobs){
     spin(true,"Probando "+j.srv.name+"…");
@@ -884,18 +926,12 @@ function embedFallback(srv){
   teardown();spin(false);
   P.el.classList.add("emb");$("#psrvb").textContent=srv.name+" · embebido";
   const f=document.createElement("iframe");f.src=srv.embedUrl;f.allow="autoplay; fullscreen; encrypted-media; picture-in-picture";f.setAttribute("allowfullscreen","");
-  // Por defecto SIN sandbox: StreamWish y otros servidores detectan el sandbox y muestran
-  // "Sandboxed embed is not allowed". Solo se activa si el usuario pide bloquear anuncios.
-  if(ls.get("tr_block",false))f.setAttribute("sandbox","allow-scripts allow-same-origin allow-forms allow-presentation");
+  // NUNCA sandbox (como en Animes Nexora): StreamWish, Voe y otros lo detectan y muestran
+  // "Sandboxed embed is not allowed". Las ventanas y redirecciones de anuncios ya las bloquea la app (MainActivity).
   f.referrerPolicy="no-referrer";
-  P.el.insertBefore(f,P.el.firstChild);paintCompat();showUI(true);
+  P.el.insertBefore(f,P.el.firstChild);showUI(true);
 }
-function paintCompat(){$("#pcompat").textContent=ls.get("tr_block",false)?"Anuncios: bloqueados":"Anuncios: permitidos"}
-$("#pcompat").onclick=()=>{
-  const on=!ls.get("tr_block",false);ls.set("tr_block",on);
-  toast(on?"Anuncios bloqueados (algunos servidores pueden no cargar)":"Modo compatible: el reproductor puede abrir anuncios");
-  if(P.list.length)embedFallback(P.list[Math.min(P.idx,P.list.length-1)]);
-};
+try{localStorage.removeItem("tr_block");localStorage.removeItem("tr_compat")}catch(e){}
 function attach(url,startAt,my){
   return new Promise(res=>{
     const v=document.createElement("video");v.playsInline=true;v.setAttribute("playsinline","");v.preload="auto";
