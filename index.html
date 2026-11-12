@@ -436,6 +436,35 @@ function bestQuality(master,base){
   }
   return best;
 }
+// Vidara / Streamix: el video se pide a su API (/api/stream) y hay que cargarlo con su Referer
+const VIDARA_RX=/(?:^|\.)(?:st(?:rea)?mix|vid(?:[wv]?ar|matrix)a*|viewdara|viderea)\.[a-z]+$/i;
+async function httpPost(url,body,{referer,ms=15000}={}){
+  const h={"Content-Type":"application/json","Accept":"application/json, text/plain, */*","User-Agent":UA};
+  if(referer){h.Referer=referer;h.Origin=referer.replace(/\/$/,"")}
+  if(!CAPH)throw new Error("necesita la app instalada");
+  const r=await Promise.race([CAPH.request({url,method:"POST",headers:h,data:body,responseType:"json",connectTimeout:15000,readTimeout:20000}),new Promise((_,j)=>setTimeout(()=>j(new Error("tardó demasiado en responder")),ms+20000))]);
+  if(r.status<200||r.status>=400)throw new Error("HTTP "+r.status);
+  return typeof r.data==="string"?JSON.parse(r.data):r.data;
+}
+async function rVidara(u){
+  const x=new URL(u),id=x.pathname.replace(/^\/(?:e|v|embed)\//i,"/").split("/").filter(Boolean)[0];
+  if(!id)throw new Error("enlace no válido");
+  const hosts=[...new Set([/^(?:streamix\.so|stmix\.io)$/i.test(x.hostname)?"vidara.to":x.hostname,"vidara.to","vidara.so"])];
+  const errs=[];
+  try{
+    return await Promise.any(hosts.map(async h=>{
+      try{
+        const ref="https://"+h+"/";
+        const j=await httpPost("https://"+h+"/api/stream",{filecode:id,device:"web"},{referer:ref});
+        const l=j&&(j.streaming_url||j.url||j.file);
+        if(!l)throw new Error(j&&j.message?String(j.message).slice(0,60):"sin enlace de video");
+        return withRef(l,ref);
+      }catch(e){errs.push(e.message);throw e}
+    }));
+  }catch(e){throw new Error(errs.find(m=>!/HTTP 404|conect/i.test(m))||errs[0]||"sin enlace de video")}
+}
+// marca un enlace para que el reproductor lo cargue enviando ese Referer (por la red nativa)
+const withRef=(l,ref)=>l+"#nxref="+encodeURIComponent(ref);
 // espejos actuales de StreamWish (los dominios viejos dejan de responder)
 const SW_DMCA=["hgplaycdn.com","hglamioz.com","niramirus.com","playnixes.com","medixiru.com"],SW_MAIN=["hanerix.com","audinifer.com","vibuxer.com"],SW_RULES=["dhcplay.com","hglink.to","hgcloud.to","test.hglink.to","wish-redirect.aiavh.com"];
 function swMirrors(u){
@@ -454,7 +483,7 @@ const DG=[];const dg=t=>{try{DG.push(t);if(DG.length>40)DG.shift()}catch(e){}};
 if(!Promise.any)Promise.any=ps=>new Promise((res,rej)=>{const a=[...ps];let n=0;if(!a.length)return rej(new Error("vacío"));a.forEach(p=>Promise.resolve(p).then(res,()=>{if(++n===a.length)rej(new Error("todos fallaron"))}))});
 // prueba todas las direcciones a la vez y se queda con la primera que dé video
 async function rStreamwish(u,direct){
-  const tries=[...new Set(direct?[u,...vhMirrors(u)]:[...swMirrors(u),u])];
+  const tries=[...new Set(direct==="vh"?[u,...vhMirrors(u)]:direct?[u]:[...swMirrors(u),u])];
   const lbl=(()=>{try{return new URL(u).hostname.replace(/^www\./,"")}catch(e){return "servidor"}})();
   const errs=[];
   try{return await Promise.any(tries.map(p=>swPage(p).then(r=>r||Promise.reject(0),e=>{errs.push(e&&e.message||"sin conexión");return Promise.reject(e)})))}
@@ -536,8 +565,9 @@ async function resolveEmbed(u){
     const lb=host||"servidor",fail=e=>{dg(lb+": "+((e&&e.message)||"error"));return null};
     if(/voe/i.test(host)){r=await rVoe(u).catch(fail);if(!r)return null} // Voe: si su extractor falla, el genérico tampoco sirve
     else if(/wish|awish|playnix|medix|niramirus|kravaxxa|davioad|haxlopp|tryzendm|dumbalag|dhcplay|hglink|hgcloud|hgplay|hglamioz|hanerix|audinifer|vibuxer/i.test(host))r=await rStreamwish(u).catch(fail);
-    else if(/vidhide|filelions|[mad]lions|callistanise|minochinos|morencius|smoothpre|dhtpre|peytonepre|movearnpre|mivalyo|dinisglows|dingtezuni|ryderjet/i.test(host)){r=await rStreamwish(u,true).catch(fail);if(!r)return null}
-    else if(/zilla|dropload|streamvid|vidguard|vidara|vidmoly|lulu|mixdrop/i.test(host))r=await rStreamwish(u,true).catch(fail);
+    else if(/vidhide|filelions|[mad]lions|callistanise|minochinos|morencius|smoothpre|dhtpre|peytonepre|movearnpre|mivalyo|dinisglows|dingtezuni|ryderjet/i.test(host)){r=await rStreamwish(u,"vh").catch(fail);if(!r)return null}
+    else if(VIDARA_RX.test(host)){r=await rVidara(u).catch(fail);if(!r)return null}
+    else if(/zilla|dropload|streamvid|vidguard|vidmoly|lulu|mixdrop/i.test(host))r=await rStreamwish(u,true).catch(fail);
     else if(/streamtape/i.test(host))r=await rStreamtape(u).catch(fail);
     if(r)return r;
     const g=await rGeneric(u);if(!g)dg((host||"servidor")+": sin enlace de video");return g; // respaldo para cualquier servidor
@@ -959,11 +989,41 @@ function attach(url,startAt,my){
     v.addEventListener("loadeddata",()=>{if(startAt>0)try{v.currentTime=startAt}catch(e){}v.play().catch(()=>{});fin(true)},{once:true});
     v.addEventListener("error",()=>done?runtimeErr():fin(false));
     bindVideo(v);
-    if(/\.m3u8/i.test(url)&&window.Hls&&Hls.isSupported()){
-      const h=new Hls({maxBufferLength:40,enableWorker:true});P.hls=h;h.loadSource(url);h.attachMedia(v);
+    let ref=null;const mr=url.match(/#nxref=([^#]+)$/);if(mr){ref=decodeURIComponent(mr[1]);url=url.slice(0,mr.index)}
+    if(((ref&&!/\.mp4(\?|$)/i.test(url))||/\.m3u8/i.test(url))&&window.Hls&&Hls.isSupported()){
+      const cfg={maxBufferLength:40,enableWorker:true};
+      if(ref&&CAPH){const L=refLoader(ref);cfg.loader=L}
+      const h=new Hls(cfg);P.hls=h;h.loadSource(url);h.attachMedia(v);
       h.on(Hls.Events.ERROR,(_,d)=>{if(d.fatal)done?runtimeErr():fin(false)});
     }else v.src=url;
   });
+}
+// cargador de hls.js que pide cada archivo por la red nativa con Referer/Origin del servidor
+function b64ab(b){const s=atob(b),a=new Uint8Array(s.length);for(let i=0;i<s.length;i++)a[i]=s.charCodeAt(i);return a.buffer}
+function refLoader(ref){
+  const org=ref.replace(/\/$/,"");
+  return class{
+    constructor(){this.stats={aborted:false,loaded:0,total:0,retry:0,chunkCount:0,bwEstimate:0,loading:{start:0,first:0,end:0},parsing:{start:0,end:0},buffering:{start:0,first:0,end:0}};this.ab=false}
+    destroy(){this.ab=true;this.cb=null}
+    abort(){if(this.ab)return;this.ab=true;this.stats.aborted=true;if(this.cb&&this.cb.onAbort)this.cb.onAbort(this.stats,this.context,null)}
+    getCacheAge(){return null}getResponseHeader(){return null}
+    load(ctx,config,cb){
+      this.context=ctx;this.cb=cb;const st=this.stats;st.loading.start=performance.now();
+      const bin=ctx.responseType==="arraybuffer";
+      const h={"User-Agent":UA,"Referer":ref,"Origin":org,"Accept":"*/*"};
+      if(ctx.rangeEnd)h.Range="bytes="+ctx.rangeStart+"-"+(ctx.rangeEnd-1);
+      CAPH.request({url:ctx.url,method:"GET",headers:h,responseType:bin?"arraybuffer":"text",connectTimeout:15000,readTimeout:25000}).then(r=>{
+        if(this.ab)return;
+        if(r.status<200||r.status>=400){cb.onError({code:r.status,text:"HTTP "+r.status},ctx,null,st);return}
+        let d=r.data;if(bin)d=typeof d==="string"?b64ab(d):d;else if(typeof d!=="string")d=JSON.stringify(d);
+        const n=bin?d.byteLength:d.length,now=performance.now();st.loaded=st.total=n;
+        st.loading.first=Math.max(st.loading.start,now-1);st.loading.end=Math.max(st.loading.first,now);
+        st.bwEstimate=n*8000/Math.max(1,st.loading.end-st.loading.start);
+        if(cb.onProgress)cb.onProgress(st,ctx,d,null);
+        cb.onSuccess({url:r.url||ctx.url,data:d,code:r.status},st,ctx,null);
+      }).catch(e=>{if(!this.ab)cb.onError({code:0,text:(e&&e.message)||"red"},ctx,null,st)});
+    }
+  };
 }
 function bindVideo(v){
   v.addEventListener("play",setPlayIcon);v.addEventListener("pause",()=>{setPlayIcon();showUI(true)});
