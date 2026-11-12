@@ -80,11 +80,50 @@ jobs:
           import android.os.Bundle;
           import android.webkit.CookieManager;
           import android.webkit.WebResourceRequest;
+          import android.webkit.WebResourceResponse;
           import android.webkit.WebView;
+          import androidx.webkit.WebViewCompat;
+          import androidx.webkit.WebViewFeature;
           import com.getcapacitor.BridgeActivity;
           import com.getcapacitor.BridgeWebViewClient;
+          import java.io.ByteArrayInputStream;
+          import java.util.Collections;
 
           public class MainActivity extends BridgeActivity {
+            // redes de anuncios: no se cargan dentro de la app (tampoco dentro del reproductor web)
+            private static final String[] ADS = {
+              "doubleclick.net", "googlesyndication.com", "googleadservices.com", "adservice.google",
+              "popads.net", "popcash.net", "propellerads", "adsterra", "exoclick", "exosrv.com", "juicyads",
+              "hilltopads", "a-ads.com", "adnxs.com", "clickadu", "monetag", "richads", "pushground", "galaksion",
+              "admaven", "ad-maven", "notix.io", "evadav", "rollerads", "realsrv.com", "bidgear", "trafficstars",
+              "tsyndicate.com", "magsrv.com", "jads.co", "adcash", "aclib", "onclickads", "onclkds", "adskeeper",
+              "mgid.com", "taboola", "outbrain", "an.yandex.ru", "histats.com", "acint.net", "dtscout.com",
+              "popunder", "highperformanceformat.com", "profitabledisplaynetwork", "effectivegatecpm",
+              "highcpmgate", "cpmrevenuegate", "toprevenuegate", "revenuecpmgate", "wpadmngr.com", "ay267.com",
+              "adexchangeclear", "pushnami", "push-notification", "pushwhy", "pushsar", "sw.js?ads"
+            };
+
+            // dentro del reproductor web: sin ventanas emergentes ni avisos falsos encima del video
+            private static final String CLEAN_JS =
+              "(function(){try{if(window.top===window)return;" +
+              "window.open=function(){return null};window.alert=function(){};window.confirm=function(){return false};window.prompt=function(){return null};" +
+              "var RX=/limpia tu|tu tel[eé]fono (est[aá]|tiene)|virus|confirma que no eres un robot|haz clic en el bot[oó]n|permitir notificaciones|allow notifications|press allow|click allow|has ganado|felicidades|ganador|bater[ií]a (est[aá]|da[nñ]ada)/i;" +
+              "function sweep(){if(!document.body)return;var all=document.body.querySelectorAll('div,section,aside,a,iframe,span');" +
+              "for(var i=0;i<all.length;i++){var el=all[i];if(!el.isConnected)continue;" +
+              "if(el.querySelector('video,altcha-widget,form,input'))continue;" +
+              "var cs=getComputedStyle(el);if(cs.position!=='fixed'&&cs.position!=='absolute')continue;" +
+              "var z=parseInt(cs.zIndex,10)||0;var t=(el.innerText||'').slice(0,500);" +
+              "if(RX.test(t)||z>=2147483000){el.remove();}}}" +
+              "new MutationObserver(function(){clearTimeout(window.__nxT);window.__nxT=setTimeout(sweep,120)}).observe(document,{childList:true,subtree:true});" +
+              "setInterval(sweep,1500);}catch(e){}})();";
+
+            private static boolean isAd(String host) {
+              if (host == null) return false;
+              host = host.toLowerCase();
+              for (String a : ADS) if (host.contains(a)) return true;
+              return false;
+            }
+
             @Override
             public void onCreate(Bundle savedInstanceState) {
               super.onCreate(savedInstanceState);
@@ -93,9 +132,21 @@ jobs:
               // el reproductor web (Voe, etc.) necesita guardar su cookie de "no soy un robot"
               CookieManager.getInstance().setAcceptCookie(true);
               CookieManager.getInstance().setAcceptThirdPartyCookies(wv, true);
+              try {
+                if (WebViewFeature.isFeatureSupported(WebViewFeature.DOCUMENT_START_SCRIPT)) {
+                  WebViewCompat.addDocumentStartJavaScript(wv, CLEAN_JS, Collections.singleton("*"));
+                }
+              } catch (Throwable t) { }
               wv.setWebViewClient(new BridgeWebViewClient(getBridge()) {
                 private boolean ownUrl(String u) {
                   return u != null && (u.startsWith("http://localhost") || u.startsWith("about:") || u.startsWith("blob:") || u.startsWith("data:"));
+                }
+                @Override
+                public WebResourceResponse shouldInterceptRequest(WebView view, WebResourceRequest request) {
+                  if (request != null && request.getUrl() != null && isAd(request.getUrl().getHost())) {
+                    return new WebResourceResponse("text/plain", "utf-8", new ByteArrayInputStream(new byte[0]));
+                  }
+                  return super.shouldInterceptRequest(view, request);
                 }
                 @Override
                 public boolean shouldOverrideUrlLoading(WebView view, WebResourceRequest request) {
@@ -119,6 +170,7 @@ jobs:
         run: |
           grep -q REQUEST_INSTALL_PACKAGES android/app/src/main/AndroidManifest.xml || sed -i 's|<application|<uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES"/>\n    <application|' android/app/src/main/AndroidManifest.xml
           sed -i "s/versionCode 1$/versionCode ${{ github.run_number }}/" android/app/build.gradle
+          grep -q 'androidx.webkit:webkit' android/app/build.gradle || printf '\ndependencies {\n    implementation "androidx.webkit:webkit:1.9.0"\n}\n' >> android/app/build.gradle
           sed -i "s/versionName \"1.0\"/versionName \"${APP_VERSION}\"/" android/app/build.gradle
           if [ -n "$NEXORA_KEYSTORE" ]; then
             echo "$NEXORA_KEYSTORE" | base64 -d > android/app/nexora.keystore
