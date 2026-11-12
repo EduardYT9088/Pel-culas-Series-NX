@@ -412,11 +412,11 @@ function swMirror(u){
 }
 const DG=[];const dg=t=>{try{DG.push(t);if(DG.length>40)DG.shift()}catch(e){}};
 async function rStreamwish(u,direct){
-  const tries=direct?[u,u]:[swMirror(u),swMirror(u),u];
+  const tries=direct?[u]:[swMirror(u),swMirror(u),u];
   const lbl=(()=>{try{return new URL(u).hostname.replace(/^www\./,"")}catch(e){return "servidor"}})();
   for(const page of tries){
     let html;
-    try{html=await http(page,{ua:UAFF,referer:page,ms:20000})}catch(e){dg(lbl+": "+((e&&e.message)||"sin conexión"));continue}
+    try{html=await http(page,{ua:UAFF,referer:page,ms:9000})}catch(e){dg(lbl+": "+((e&&e.message)||"sin conexión"));continue}
     const texts=[];
     html.split(/<script/i).forEach(b=>{if(/eval\(function\(p,a,c,k,e,d\)/.test(b)){const un=unpack(b.slice(b.indexOf("eval(function(p,a,c,k,e,d)")));if(un)texts.push(un)}});
     texts.push(html);
@@ -461,7 +461,7 @@ function findMedia(text){
 }
 async function rGeneric(u,depth=0){
   let ref;try{ref=new URL(u).origin+"/"}catch(e){ref=BASE()+"/"}
-  const html=await http(u,{referer:ref,ua:UAFF,ms:20000});
+  const html=await http(u,{referer:ref,ua:UAFF,ms:9000});
   const texts=[html];
   html.split(/<script/i).forEach(b=>{if(/eval\(function\(p,a,c,k,e,d\)/.test(b)){const un=unpack(b);if(un)texts.push(un)}});
   for(const t of texts){
@@ -739,7 +739,13 @@ function renderDetail(i){
   $("#dback").onclick=()=>history.back();
   $("#dshare").onclick=()=>{if(navigator.share)navigator.share({title:clean(i.title),text:"Mira "+clean(i.title)+" en Tramoya",url:i.url||""}).catch(()=>{});else toast("Compartir no disponible aquí")};
   $("#dfav").onclick=()=>{toggleFav(i);$("#dfav").innerHTML=isFav(i)?IC.check:IC.plus};
-  $("#dplay").onclick=()=>startPlay(i);
+  $("#dplay").onclick=()=>{
+    if(!isS)return startPlay(i);
+    const h=S.hist.find(x=>x.slug===i.slug&&x.s&&x.e);
+    if(h&&seasons.some(z=>z.number===h.s))return startPlay(i,h.s,h.e);
+    const s0=seasons[0],e0=s0&&s0.episodes[0];
+    if(e0)startPlay(i,s0.number,e0.number);else toast("No hay episodios disponibles");
+  };
   const mo=$("#more");if(mo)mo.onclick=()=>{$("#syn").classList.remove("clamp");mo.remove()};
   if(isS){
     if(!seasons.length){$("#eps").innerHTML=`<div class="empty">No hay episodios disponibles.</div>`;return}
@@ -849,7 +855,7 @@ async function playFrom(i,startAt){
   const jobs=[];
   for(let k=i;k<P.list.length;k++){
     const srv=P.list[k];
-    jobs.push({k,srv,p:api(`/resolve?url=${encodeURIComponent(srv.embedUrl)}`).then(r=>r&&r.directUrl?r.directUrl:null).catch(()=>null)});
+    jobs.push({k,srv,p:Promise.race([api(`/resolve?url=${encodeURIComponent(srv.embedUrl)}`).then(r=>r&&r.directUrl?r.directUrl:null).catch(()=>null),new Promise(r=>setTimeout(()=>r(null),10000))])});
   }
   for(const j of jobs){
     spin(true,"Probando "+j.srv.name+"…");
