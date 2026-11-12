@@ -303,7 +303,8 @@ async function http(url,{referer,ua=UA,ms=15000}={}){
   const h={"Accept":"text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8","Accept-Language":"es-ES,es;q=0.9,en;q=0.8","User-Agent":ua};
   if(referer)h.Referer=referer;
   if(CAPH){ // red nativa: sin CORS
-    const r=await Promise.race([CAPH.get({url,headers:h,responseType:"text",connectTimeout:ms,readTimeout:ms}),new Promise((_,j)=>setTimeout(()=>j(Object.assign(new Error("timeout"),{name:"AbortError"})),ms+2000))]);
+    const ct=Math.max(ms,15000),rt=Math.max(ms,20000); // como Animes Nexora: la red móvil a veces tarda en conectar
+    const r=await Promise.race([CAPH.get({url,headers:h,responseType:"text",connectTimeout:ct,readTimeout:rt}),new Promise((_,j)=>setTimeout(()=>j(Object.assign(new Error("tardó demasiado en responder"),{name:"AbortError"})),ct+rt))]);
     if(r.status<200||r.status>=400)throw new Error("HTTP "+r.status);
     return typeof r.data==="string"?r.data:JSON.stringify(r.data);
   }
@@ -372,8 +373,17 @@ function voeDecode(raw,lut){
     return JSON.parse(b64(s));
   }catch(e){return null}
 }
-// Voe ahora cambia los símbolos del cifrado en su script: se leen de ahí y, si no, se usan los de siempre
+// Voe tiene muchos dominios con el mismo video: si voe.sx no conecta, responde otro
+const VOE_ALT=["jamespatterncamera.com","susanexpectcare.com","shannoncoldalready.com","claireguessthousand.com","derricknationtop.com"];
 async function rVoe(u){
+  let id="";try{id=new URL(u).pathname.replace(/^\/(?:e\/)?/,"").split(/[/?#]/)[0]}catch(e){}
+  const urls=[u,...(id?VOE_ALT.sort(()=>Math.random()-.5).slice(0,3).map(h=>"https://"+h+"/e/"+id):[])];
+  const errs=[];
+  try{return await Promise.any(urls.map(x=>rVoe1(x).catch(e=>{errs.push(e);throw e})))}
+  catch(e){const m=errs.map(x=>x&&x.message||"").find(x=>/verificación|descifrar|enlace/.test(x));throw new Error(m||"no conecta con ningún dominio de Voe")}
+}
+// Voe ahora cambia los símbolos del cifrado en su script: se leen de ahí y, si no, se usan los de siempre
+async function rVoe1(u){
   let page=u,html=await http(u,{ua:UAFF,ms:9000});
   for(let i=0;i<3;i++){
     const m=html.match(/window\.location\.href\s*=\s*['"]([^'"]+)['"]/);
@@ -391,6 +401,7 @@ async function rVoe(u){
       if(a)lut=[...a[0].matchAll(/'([^']{2})'/g)].map(x=>x[1]);
     }catch(e){}
   }
+  if(!enc){const r2=html.match(/json">\s*\[\s*"([^"]+)"\s*\]\s*<\/script>/i);if(r2)enc=r2[1]}
   if(!enc){
     const sc=[...dom(html).querySelectorAll('script[type="application/json"]')].find(s=>{try{const p=JSON.parse(s.textContent);return Array.isArray(p)&&typeof p[0]==="string"}catch(e){return false}});
     if(sc)enc=JSON.parse(sc.textContent)[0];
@@ -897,13 +908,18 @@ async function playFrom(i,startAt){
     const srv=P.list[k];
     let fin=false;
     const job=api(`/resolve?url=${encodeURIComponent(srv.embedUrl)}`).then(r=>r&&r.directUrl?r.directUrl:null).catch(()=>null).finally(()=>{fin=true});
-    jobs.push({k,srv,p:Promise.race([job,new Promise(r=>setTimeout(()=>{if(!fin&&my===P.tok)dg(srv.name+": tardó demasiado");r(null)},15000))])});
+    jobs.push({k,srv,p:Promise.race([job,new Promise(r=>setTimeout(()=>{if(!fin&&my===P.tok)dg(srv.name+": tardó demasiado");r(null)},30000))])});
   }
-  for(const j of jobs){
-    spin(true,"Probando "+j.srv.name+"…");
-    const url=await j.p;
+  // como Animes Nexora: se reproduce el PRIMER servidor que entregue video, sin esperar a los lentos
+  spin(true,"Probando "+jobs.length+" servidores a la vez…");
+  const pend=jobs.map(j=>j.p.then(url=>({j,url})));
+  const live=new Set(pend.map((p,n)=>n));
+  while(live.size){
+    const {j,url,n}=await Promise.race([...live].map(n=>pend[n].then(r=>({...r,n}))));
+    live.delete(n);
     if(my!==P.tok)return;
     if(!url)continue;
+    spin(true,"Cargando desde "+j.srv.name+"…");
     const ok=await attach(url,startAt,my);
     if(my!==P.tok)return;
     if(ok){P.idx=j.k;$("#psrvb").textContent=j.srv.name;spin(false);return}
